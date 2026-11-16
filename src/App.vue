@@ -3,13 +3,14 @@
 // rail de catégories à gauche, sections de tuiles à droite, barre d'état en bas.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from "vue";
 import CategoryRail from "./components/CategoryRail.vue";
+import ConfigError from "./components/ConfigError.vue";
 import LaunchToast from "./components/LaunchToast.vue";
 import SearchBar from "./components/SearchBar.vue";
 import StatusBar from "./components/StatusBar.vue";
 import TileSection from "./components/TileSection.vue";
 import { useKeyboardNav, type Direction } from "./composables/useKeyboardNav";
 import { useLauncher } from "./composables/useLauncher";
-import { ipc } from "./lib/ipc";
+import { ipc, toIpcError } from "./lib/ipc";
 import { kindLabel, targetText } from "./lib/tiles";
 
 const L = useLauncher();
@@ -69,6 +70,14 @@ async function launch(index?: number) {
   }
 }
 
+async function openConfigFolder() {
+  try {
+    await ipc.openConfigFolder();
+  } catch (e) {
+    showToast({ message: "Impossible d'ouvrir le dossier", detail: toIpcError(e).message, error: true });
+  }
+}
+
 async function toggleFavorite(id: string) {
   try {
     await L.toggleFavorite(id);
@@ -119,12 +128,19 @@ onMounted(L.load);
       <CategoryRail v-model="L.rail.value" :items="L.railItems.value" :tile-count="L.config.value?.tiles.length ?? 0" />
 
       <div ref="scroller" class="scroll">
-        <p v-if="L.error.value" class="empty">Impossible de lire la configuration.<br /><code>{{ L.error.value }}</code></p>
-        <p v-else-if="L.config.value && L.sections.value.length === 0" class="empty">
+        <ConfigError
+          v-if="L.error.value"
+          :error="L.error.value"
+          :compact="!!L.config.value"
+          @retry="L.load"
+          @open-folder="openConfigFolder"
+        />
+        <p v-if="L.config.value && L.sections.value.length === 0" class="empty">
           <template v-if="L.query.value.trim()">Aucune tuile pour <strong>« {{ L.query.value.trim() }} »</strong>.</template>
           <template v-else-if="L.rail.value === 'favorites'">Aucun favori pour l'instant. Sélectionnez une tuile et appuyez sur <kbd>Ctrl</kbd> <kbd>D</kbd>.</template>
           <template v-else>Cette catégorie est vide.</template>
-          <br />Ajoutez des tuiles dans <code>config.json</code>.
+          <br />Ajoutez des tuiles dans <code>config.json</code>
+          (<a href="#" @click.prevent="openConfigFolder">ouvrir le dossier</a>).
         </p>
         <TileSection
           v-for="section in L.sections.value"
@@ -155,4 +171,5 @@ onMounted(L.load);
 .empty { padding: 48px 16px; margin: 0; text-align: center; color: var(--muted); }
 .empty strong { color: var(--fg); font-weight: 500; }
 .empty code { font: 12px var(--font-mono); }
+.empty a { color: var(--accent); }
 </style>

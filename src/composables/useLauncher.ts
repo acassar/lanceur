@@ -1,7 +1,7 @@
 // État central de la fenêtre : config, recherche, catégorie, sélection,
 // et sections calculées à afficher (variante B de la maquette).
 import { computed, ref, watch } from "vue";
-import { ipc } from "../lib/ipc";
+import { ipc, toIpcError, type IpcError } from "../lib/ipc";
 import { filterTiles } from "../lib/search";
 import type { Config, Tile } from "../lib/types";
 
@@ -29,14 +29,20 @@ export function useLauncher() {
   const query = ref("");
   const rail = ref<RailKey>("all");
   const selected = ref(0);
-  const error = ref<string | null>(null);
+  /** Erreur de lecture de config.json (JSON invalide, fichier illisible…). */
+  const error = ref<IpcError | null>(null);
 
+  /**
+   * Charge (ou recharge) la config. En cas d'erreur, la dernière config valide
+   * reste affichée s'il y en a une ; l'erreur s'affiche à côté.
+   */
   async function load() {
     try {
       config.value = await ipc.getConfig();
       recents.value = await ipc.getRecents();
+      error.value = null;
     } catch (e) {
-      error.value = String(e);
+      error.value = toIpcError(e);
     }
   }
 

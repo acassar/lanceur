@@ -1,6 +1,9 @@
-// Fausse couche IPC : elle imite les futures commandes Rust avec des données
-// d'exemple gardées en mémoire. Elle permet de développer et tester toute
-// l'interface dans un navigateur (npm run dev), sans Rust.
+// Fausse couche IPC : elle imite les commandes Rust avec des données d'exemple
+// gardées en mémoire. Elle permet de développer et tester toute l'interface dans
+// un navigateur (npm run dev), sans Rust.
+//
+// Dans l'app, ipc.ts lui passe la vraie lecture de config.json (commande Rust
+// get_config) : seules les commandes pas encore écrites restent simulées.
 import type { Ipc } from "./ipc";
 import type { Config } from "./types";
 
@@ -56,25 +59,38 @@ const SAMPLE: Config = {
   ],
 };
 
-export function createMockIpc(): Ipc {
-  const config: Config = structuredClone(SAMPLE);
-  let recents = ["bg3", "discord", "instagram", "cs2"];
+/**
+ * @param loadConfig d'où vient la config : les données d'exemple par défaut,
+ *   la commande Rust get_config dans l'app.
+ * @param initialRecents récents simulés au démarrage.
+ */
+export function createMockIpc(
+  loadConfig: () => Promise<Config> = async () => structuredClone(SAMPLE),
+  initialRecents = ["bg3", "discord", "instagram", "cs2"],
+): Pick<Ipc, "getConfig" | "getRecents" | "launch" | "toggleFavorite" | "hideWindow"> {
+  let config: Config | null = null;
+  let recents = initialRecents;
 
   return {
     async getConfig() {
+      config = await loadConfig();
+      // On ignore les récents qui ne correspondent à aucune tuile de cette config.
+      const ids = new Set(config.tiles.map((t) => t.id));
+      recents = recents.filter((id) => ids.has(id));
       return structuredClone(config);
     },
     async getRecents() {
       return [...recents];
     },
     async launch(id) {
-      const tile = config.tiles.find((t) => t.id === id);
+      const tile = config?.tiles.find((t) => t.id === id);
       if (!tile) throw new Error(`Tuile inconnue : ${id}`);
       console.info("[ipc mock] launch", tile);
-      recents = [id, ...recents.filter((r) => r !== id)].slice(0, config.settings.recentsCount);
+      recents = [id, ...recents.filter((r) => r !== id)].slice(0, config?.settings.recentsCount ?? 4);
       return [...recents];
     },
     async toggleFavorite(id) {
+      if (!config) return [];
       const i = config.favorites.indexOf(id);
       if (i >= 0) config.favorites.splice(i, 1);
       else config.favorites.push(id);
