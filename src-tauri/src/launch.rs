@@ -34,6 +34,8 @@ pub enum Action {
         program: PathBuf,
         args: Vec<String>,
         dir: Option<PathBuf>,
+        /// `true` si `program` est un chemin à vérifier avant de lancer.
+        must_exist: bool,
     },
     /// Ouvrir un fichier comme un double-clic (`.lnk`, `.bat`, `.url`…) ou un
     /// programme connu de Windows (`msedge`), avec des paramètres optionnels.
@@ -69,7 +71,7 @@ pub fn plan(
         Target::App { path, args } => {
             let path = PathBuf::from(expand_env(path, &env));
             let args: Vec<String> = args.iter().map(|a| expand_env(a, &env)).collect();
-            // Le dossier de travail est celui du fichier : beaucoup de jeux et
+            // Le dossier de travail d'un `.exe` est le sien : beaucoup de jeux et
             // d'outils cherchent leurs fichiers « à côté » d'eux.
             // `.map(Path::to_path_buf)` transforme `Option<&Path>` en `Option<PathBuf>`.
             let dir = path
@@ -77,18 +79,25 @@ pub fn plan(
                 .filter(|d| !d.as_os_str().is_empty())
                 .map(Path::to_path_buf);
 
+            // Un nom seul (`notepad.exe`) est cherché par Windows dans le PATH :
+            // on ne vérifie l'existence que pour un vrai chemin.
+            let must_exist = path.components().count() > 1;
+
             if is_exe(&path) {
                 Ok(Action::Spawn {
                     program: path,
                     args,
                     dir,
+                    must_exist,
                 })
             } else {
                 Ok(Action::ShellOpen {
                     file: path,
                     params: join_args(&args),
-                    dir,
-                    must_exist: true,
+                    // Pas de dossier imposé : un `.lnk` a son propre champ
+                    // « Démarrer dans », comme lors d'un double-clic.
+                    dir: None,
+                    must_exist,
                 })
             }
         }
@@ -112,8 +121,15 @@ pub fn run(action: Action) -> Result<(), AppError> {
     match action {
         Action::OpenUrl(url) => shell_execute(Path::new(&url), "", None),
 
-        Action::Spawn { program, args, dir } => {
-            ensure_exists(&program)?;
+        Action::Spawn {
+            program,
+            args,
+            dir,
+            must_exist,
+        } => {
+            if must_exist {
+                ensure_exists(&program)?;
+            }
             let mut cmd = std::process::Command::new(&program);
             cmd.args(&args)
                 // On ne transmet pas nos entrées/sorties au programme lancé :
@@ -410,6 +426,7 @@ mod tests {
                 program: r"C:\Users\A\AppData\Local\Discord\Update.exe".into(),
                 args: vec!["--processStart".into(), "Discord.exe".into()],
                 dir: Some(r"C:\Users\A\AppData\Local\Discord".into()),
+                must_exist: true,
             }
         );
         // L'extension est reconnue quelle que soit la casse.
@@ -477,6 +494,19 @@ mod tests {
     }
 
     #[test]
+    fn un_nom_seul_est_cherche_par_windows() {
+        // Pas de vérification d'existence : Windows le cherchera dans le PATH.
+        let Action::Spawn {
+            must_exist, dir, ..
+        } = plan(&app("notepad.exe", &[]), "", env).unwrap()
+        else {
+            panic!("action inattendue");
+        };
+        assert!(!must_exist);
+        assert_eq!(dir, None);
+    }
+
+    #[test]
     fn web_refuse_les_url_dangereuses() {
         for url in [
             "file:///C:/x",
@@ -531,6 +561,7 @@ mod tests {
             program: "/introuvable/jeu.exe".into(),
             args: vec![],
             dir: None,
+            must_exist: true,
         };
         assert!(matches!(run(action), Err(AppError::NotFound(_))));
     }

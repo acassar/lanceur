@@ -53,19 +53,31 @@ static WRITE_LOCK: Mutex<()> = Mutex::new(());
 /// Lit `state.json`. S'il n'existe pas ou s'il est abîmé, on repart d'un état
 /// vide plutôt que de bloquer l'app : ce ne sont que des récents.
 pub fn load(dir: &Path) -> State {
+    try_load(dir).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        State::default()
+    })
+}
+
+/// Comme [`load`], mais une erreur de lecture (fichier verrouillé un instant
+/// par un antivirus ou OneDrive…) est renvoyée au lieu d'être ignorée. Sinon,
+/// `record_launch` repartirait d'un état vide et effacerait l'historique.
+/// Un fichier absent ou du JSON invalide donnent toujours un état vide.
+fn try_load(dir: &Path) -> Result<State, AppError> {
     let path = dir.join(FILE_NAME);
     match fs::read_to_string(&path) {
         // `unwrap_or_else` : si la lecture du JSON échoue, on exécute la closure
         // (message dans la console) et on prend un `State` vide à la place.
-        Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
+        Ok(text) => Ok(serde_json::from_str(&text).unwrap_or_else(|e| {
             eprintln!("{} ignoré (JSON invalide) : {e}", path.display());
             State::default()
+        })),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(State::default()),
+        Err(source) => Err(AppError::Io {
+            action: "de lire",
+            path,
+            source,
         }),
-        Err(e) if e.kind() == ErrorKind::NotFound => State::default(),
-        Err(e) => {
-            eprintln!("{} illisible : {e}", path.display());
-            State::default()
-        }
     }
 }
 
@@ -109,7 +121,7 @@ pub fn record_launch(dir: &Path, id: &str) -> Result<State, AppError> {
     // `_guard` relâche le verrou tout seul à la fin de la fonction, quand la
     // variable disparaît (c'est le principe « RAII » de Rust : pas de `finally`).
 
-    let mut state = load(dir);
+    let mut state = try_load(dir)?;
     push_recent(&mut state, id, now_iso());
     save(dir, &state)?;
     Ok(state)
@@ -120,7 +132,9 @@ pub fn record_launch(dir: &Path, id: &str) -> Result<State, AppError> {
 /// l'ancien fichier reste intact au lieu d'être à moitié écrit.
 fn save(dir: &Path, state: &State) -> Result<(), AppError> {
     let path = dir.join(FILE_NAME);
-    let tmp = dir.join("state.json.tmp");
+    // Nom temporaire propre à ce processus (`id()` = numéro du processus) :
+    // si deux copies de l'app tournent, elles n'écrivent pas le même fichier.
+    let tmp = dir.join(format!("state.json.{}.tmp", std::process::id()));
     let io_err = |path: &Path| {
         let path = path.to_path_buf();
         move |source| AppError::Io {
@@ -238,7 +252,8 @@ mod tests {
         let state = record_launch(dir.path(), "b").unwrap();
         assert_eq!(ids(&state), ["b", "a"]);
         assert_eq!(load(dir.path()), state);
-        assert!(!dir.path().join("state.json.tmp").exists());
+        // Il ne reste que state.json : le fichier temporaire a été renommé.
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]
@@ -248,6 +263,14 @@ mod tests {
         assert_eq!(load(dir.path()), State::default());
         let state = record_launch(dir.path(), "a").unwrap();
         assert_eq!(ids(&state), ["a"]);
+    }
+
+    #[test]
+    fn une_erreur_de_lecture_n_efface_pas_l_historique() {
+        let dir = tempfile::tempdir().unwrap();
+        // Un dossier à la place du fichier : la lecture échoue (ni absent, ni JSON).
+        fs::create_dir(dir.path().join(FILE_NAME)).unwrap();
+        assert!(record_launch(dir.path(), "a").is_err());
     }
 
     #[test]

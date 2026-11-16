@@ -49,7 +49,24 @@ async fn get_recents(app: tauri::AppHandle) -> Result<Vec<String>, AppError> {
 #[tauri::command]
 async fn launch(app: tauri::AppHandle, id: String) -> Result<Vec<String>, AppError> {
     let dir = config::config_dir(&app)?;
-    let config = config::load_or_create(&dir)?;
+    // Lire les fichiers et attendre Windows peut prendre un moment (Steam qui
+    // démarre…). `spawn_blocking` fait ce travail sur un thread prévu pour
+    // attendre, sans occuper ceux qui traitent les autres commandes.
+    // `move` donne à la closure la propriété de `dir` et `id`.
+    tauri::async_runtime::spawn_blocking(move || launch_tile(&dir, &id))
+        .await
+        // `await` échoue seulement si le thread a paniqué.
+        .unwrap_or_else(|e| {
+            Err(AppError::Launch {
+                target: "la tuile".into(),
+                reason: e.to_string(),
+            })
+        })
+}
+
+/// Le travail de la commande `launch`, en code « normal » (non async).
+fn launch_tile(dir: &std::path::Path, id: &str) -> Result<Vec<String>, AppError> {
+    let config = config::load_or_create(dir)?;
 
     // `iter().find(…)` renvoie `Option<&Tile>` ; `ok_or_else` le transforme
     // en `Result` : `None` devient l'erreur `UnknownTile`, et `?` la renvoie.
@@ -57,16 +74,16 @@ async fn launch(app: tauri::AppHandle, id: String) -> Result<Vec<String>, AppErr
         .tiles
         .iter()
         .find(|t| t.id == id)
-        .ok_or_else(|| AppError::UnknownTile(id.clone()))?;
+        .ok_or_else(|| AppError::UnknownTile(id.to_string()))?;
 
     launch::launch(&tile.target, &config.settings.browser)?;
 
     // La tuile est lancée : si l'écriture des récents échoue, on ne veut pas
     // afficher « Impossible de lancer ». On le signale dans la console et on
     // renvoie les récents sans ce lancement.
-    let state = state::record_launch(&dir, &tile.id).unwrap_or_else(|e| {
+    let state = state::record_launch(dir, &tile.id).unwrap_or_else(|e| {
         eprintln!("récents non enregistrés : {e}");
-        state::load(&dir)
+        state::load(dir)
     });
     Ok(state::visible_recents(&state, &config))
 }

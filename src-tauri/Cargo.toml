@@ -31,6 +31,7 @@ serde_path_to_error = "0.1"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_System_Com",
+  # requis par la struct SHELLEXECUTEINFOW (champ hkeyClass)
   "Win32_System_Registry",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
