@@ -1,0 +1,47 @@
+// Types partagés du front. Ils décrivent le contenu de config.json et
+// seront le miroir exact des structs Rust de l'étape 2.
+
+/** Réglages généraux (section "settings" de config.json). */
+export interface Settings {
+  hotkey: string;
+  hideAfterLaunch: boolean;
+  hideOnBlur: boolean;
+  accent: string;
+  browser: string;
+  recentsCount: number;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+}
+
+interface TileBase {
+  id: string;
+  name: string;
+  category: string;
+  /** Chemin d'une image qui remplace l'icône trouvée automatiquement. */
+  icon?: string;
+}
+
+/**
+ * Une tuile. Le champ `type` sert de discriminant : TypeScript sait par exemple
+ * qu'une tuile `steam` a forcément un `appId`. Côté Rust, ce sera une `enum`.
+ */
+export type Tile = TileBase &
+  (
+    | { type: "steam"; appId: number }
+    | { type: "app"; path: string; args?: string[] }
+    | { type: "web"; url: string }
+  );
+
+export type TileType = Tile["type"];
+
+export interface Config {
+  version: 1;
+  settings: Settings;
+  categories: Category[];
+  /** Ids des tuiles favorites, dans l'ordre d'affichage. */
+  favorites: string[];
+  tiles: Tile[];
+}
