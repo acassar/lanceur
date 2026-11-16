@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "settings": {
+    "hotkey": "Ctrl+Alt+Space",
+    "hideAfterLaunch": true,
+    "hideOnBlur": true,
+    "accent": "#f0a35e",
+    "browser": "msedge",
+    "recentsCount": 4
+  },
+  "categories": [
+    { "id": "jeux", "name": "Jeux" },
+    { "id": "outils", "name": "Outils" },
+    { "id": "web", "name": "Web" }
+  ],
+  "favorites": ["cs2", "discord", "instagram"],
+  "tiles": [
+    { "id": "cs2", "name": "Counter-Strike 2", "category": "jeux", "type": "steam", "appId": 730 },
+    { "id": "bg3", "name": "Baldur's Gate 3", "category": "jeux", "type": "steam", "appId": 1086940 },
+
+    { "id": "steam", "name": "Steam", "category": "outils", "type": "app",
+      "path": "C:\\Program Files (x86)\\Steam\\steam.exe" },
+    { "id": "discord", "name": "Discord", "category": "outils", "type": "app",
+      "path": "%LOCALAPPDATA%\\Discord\\Update.exe", "args": ["--processStart", "Discord.exe"] },
+    { "id": "vscode", "name": "VS Code", "category": "outils", "type": "app",
+      "path": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Visual Studio Code\\Visual Studio Code.lnk" },
+
+    { "id": "instagram", "name": "Instagram", "category": "web", "type": "web", "url": "https://www.instagram.com" },
+    { "id": "amazon", "name": "Amazon", "category": "web", "type": "web", "url": "https://www.amazon.fr" },
+    { "id": "youtube", "name": "YouTube", "category": "web", "type": "web", "url": "https://www.youtube.com" }
+  ]
+}
