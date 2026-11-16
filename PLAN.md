@@ -100,6 +100,8 @@ Ils sont stockés dans `%APPDATA%\io.github.acassar.lanceur\`, le dossier que Ta
 
 Les récents vont dans un fichier séparé pour que l'app ne réécrive pas votre `config.json` à chaque lancement.
 
+Quand vous ajoutez ou retirez un favori, l'app ne remplace que le tableau `"favorites"` dans `config.json` (ou l'ajoute avant `"tiles"` s'il manque) : votre mise en forme, vos lignes vides et l'ordre des champs sont conservés. Si le fichier est invalide à ce moment-là, il n'est pas touché et l'erreur s'affiche.
+
 ### `config.json`
 
 ```jsonc

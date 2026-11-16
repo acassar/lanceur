@@ -127,31 +127,12 @@ pub fn record_launch(dir: &Path, id: &str) -> Result<State, AppError> {
     Ok(state)
 }
 
-/// Écrit `state.json` de façon *atomique* : on écrit d'abord un fichier
-/// temporaire, puis on le renomme. Si l'app est coupée en plein milieu,
-/// l'ancien fichier reste intact au lieu d'être à moitié écrit.
+/// Écrit `state.json` de façon atomique (voir `fsutil::write_atomic`).
 fn save(dir: &Path, state: &State) -> Result<(), AppError> {
-    let path = dir.join(FILE_NAME);
-    // Nom temporaire propre à ce processus (`id()` = numéro du processus) :
-    // si deux copies de l'app tournent, elles n'écrivent pas le même fichier.
-    let tmp = dir.join(format!("state.json.{}.tmp", std::process::id()));
-    let io_err = |path: &Path| {
-        let path = path.to_path_buf();
-        move |source| AppError::Io {
-            action: "d'écrire",
-            path,
-            source,
-        }
-    };
-
-    fs::create_dir_all(dir).map_err(io_err(dir))?;
     // `to_string_pretty` ne peut pas échouer sur ces structs simples ;
     // `expect` documente cette certitude (et arrêterait l'app sinon).
     let json = serde_json::to_string_pretty(state).expect("State est toujours sérialisable");
-    fs::write(&tmp, json).map_err(io_err(&tmp))?;
-    // Sous Windows, `rename` remplace le fichier de destination s'il existe.
-    fs::rename(&tmp, &path).map_err(io_err(&path))?;
-    Ok(())
+    crate::fsutil::write_atomic(&dir.join(FILE_NAME), json.as_bytes())
 }
 
 /// Date et heure actuelles en UTC, au format `2026-11-16T13:40:00Z`.

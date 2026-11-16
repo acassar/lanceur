@@ -69,6 +69,10 @@ pub enum AppError {
     )]
     InvalidUrl(String),
 
+    /// La modification de config.json (favoris) a été annulée avant écriture.
+    #[error("Favoris non enregistrés dans config.json : {0}")]
+    ConfigWrite(String),
+
     /// Windows a refusé de lancer la cible (`reason` vient de Windows).
     #[error("Impossible de lancer {target} : {reason}")]
     Launch { target: String, reason: String },
@@ -86,6 +90,7 @@ impl AppError {
             AppError::NoConfigDir(_)
             | AppError::UnknownTile(_)
             | AppError::InvalidUrl(_)
+            | AppError::ConfigWrite(_)
             | AppError::Launch { .. } => None,
             AppError::NotFound(path) => Some(path),
             AppError::Io { path, .. }

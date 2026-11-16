@@ -2,8 +2,7 @@
 // gardées en mémoire. Elle permet de développer et tester toute l'interface dans
 // un navigateur (npm run dev), sans Rust.
 //
-// Dans l'app, ipc.ts lui passe la vraie lecture de config.json (commande Rust
-// get_config) : seules les commandes pas encore écrites restent simulées.
+// Dans l'app (Tauri), ipc.ts utilise les vraies commandes Rust à la place.
 import type { Ipc } from "./ipc";
 import type { Config } from "./types";
 
