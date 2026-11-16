@@ -6,13 +6,18 @@
 //! donc *que le texte du tableau* `"favorites": [ … ]`, octet pour octet ;
 //! tout le reste du fichier est recopié tel quel.
 //!
-//! Étapes de [`toggle`] :
+//! Le tableau garde son style : sur une seule ligne, ou un id par ligne
+//! (même retrait). Un tableau vidé devient `[]`.
+//!
+//! Étapes de [`set`] :
 //! 1. lire le texte et le valider (un fichier invalide n'est jamais touché) ;
 //! 2. calculer la nouvelle liste ;
 //! 3. remplacer le tableau dans le texte (ou l'ajouter s'il n'existe pas) ;
 //! 4. revalider le nouveau texte, par sécurité ;
 //! 5. l'écrire de façon atomique (`fsutil::write_atomic`).
 
+use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -23,22 +28,34 @@ use crate::config;
 use crate::error::AppError;
 use crate::fsutil;
 
-/// Verrou : deux Ctrl+D très rapprochés ne doivent pas lire le même fichier
+/// Verrou : deux clics très rapprochés ne doivent pas lire le même fichier
 /// puis l'écrire chacun de leur côté (le second effacerait le premier).
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
-/// Ajoute `id` aux favoris (à la fin) s'il n'y est pas, le retire sinon.
+/// Met `id` en favori (`favorite = true`, ajouté à la fin) ou l'en retire.
 /// Renvoie la nouvelle liste, que le front affiche aussitôt.
-pub fn toggle(dir: &Path, id: &str) -> Result<Vec<String>, AppError> {
+///
+/// Le front envoie l'état *voulu* (celui que montre l'étoile) plutôt que
+/// « inverse ce qui est sur le disque » : un double-clic, ou un fichier modifié
+/// à la main pendant que la fenêtre est ouverte, ne peuvent donc pas faire
+/// l'inverse de ce que l'utilisateur voit. Répéter le même appel ne change rien.
+pub fn set(dir: &Path, id: &str, favorite: bool) -> Result<Vec<String>, AppError> {
     let _guard = WRITE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    // Crée le fichier d'exemple au besoin (premier démarrage) et le valide.
-    config::load_or_create(dir)?;
-    // On relit le *texte* : c'est lui qu'on va modifier.
     let path = dir.join(config::FILE_NAME);
-    let text = config::read(&path)?;
+    // On a besoin du *texte* du fichier : c'est lui qu'on va modifier.
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        // Premier démarrage : on crée la config d'exemple, puis on la lit.
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            config::load_or_create(dir)?;
+            config::read(&path)?
+        }
+        // Les autres erreurs (encodage, droits…) : même message que `get_config`.
+        Err(_) => config::read(&path)?,
+    };
     let config = config::parse(&text, &path)?;
 
     if !config.tiles.iter().any(|t| t.id == id) {
@@ -46,12 +63,15 @@ pub fn toggle(dir: &Path, id: &str) -> Result<Vec<String>, AppError> {
     }
 
     let mut favorites = config.favorites.clone();
-    // `iter().position(…)` : index du premier élément qui correspond, ou `None`.
-    match favorites.iter().position(|f| f == id) {
-        Some(i) => {
-            favorites.remove(i);
-        }
-        None => favorites.push(id.to_string()),
+    // `contains` : déjà favori ? Si l'état voulu est déjà là, rien à écrire.
+    if favorites.iter().any(|f| f == id) == favorite {
+        return Ok(favorites);
+    }
+    if favorite {
+        favorites.push(id.to_string());
+    } else {
+        // `retain` garde les éléments pour lesquels la closure renvoie `true`.
+        favorites.retain(|f| f != id);
     }
 
     let new_text = set_favorites(&text, &favorites).ok_or_else(|| {
@@ -286,16 +306,21 @@ mod tests {
     }
 
     #[test]
-    fn toggle_ajoute_puis_retire_et_persiste() {
+    fn ajoute_puis_retire_et_persiste() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(config::FILE_NAME);
         // Pas de fichier : la config d'exemple est créée.
         assert_eq!(
-            toggle(dir.path(), "bg3").unwrap(),
+            set(dir.path(), "bg3", true).unwrap(),
             ["cs2", "discord", "instagram", "bg3"]
         );
         assert_eq!(
-            toggle(dir.path(), "cs2").unwrap(),
+            set(dir.path(), "cs2", false).unwrap(),
+            ["discord", "instagram", "bg3"]
+        );
+        // Même demande deux fois (double-clic) : rien ne change.
+        assert_eq!(
+            set(dir.path(), "cs2", false).unwrap(),
             ["discord", "instagram", "bg3"]
         );
         // Relu depuis le disque, comme après un redémarrage.
@@ -320,7 +345,7 @@ mod tests {
         let path = dir.path().join(config::FILE_NAME);
         fs::write(&path, EXAMPLE).unwrap();
         assert!(matches!(
-            toggle(dir.path(), "inconnue"),
+            set(dir.path(), "inconnue", true),
             Err(AppError::UnknownTile(_))
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), EXAMPLE);
@@ -328,7 +353,7 @@ mod tests {
         let broken = EXAMPLE.replacen("\"version\": 1,", "\"version\": 1,,", 1);
         fs::write(&path, &broken).unwrap();
         assert!(matches!(
-            toggle(dir.path(), "bg3"),
+            set(dir.path(), "bg3", true),
             Err(AppError::Json { .. })
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), broken);

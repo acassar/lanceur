@@ -9,9 +9,13 @@
 
 use std::fs;
 use std::io::{ErrorKind, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::AppError;
+
+/// Compteur partagé par tout le programme pour nommer les fichiers temporaires.
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Remplace le contenu de `path` par `contents`, de façon atomique.
 ///
@@ -20,15 +24,23 @@ use crate::error::AppError;
 pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), AppError> {
     // Si `config.json` est un lien symbolique (vers un dossier synchronisé…),
     // on écrit dans le vrai fichier pour ne pas remplacer le lien par une copie.
-    // `canonicalize` échoue si le fichier n'existe pas encore : on garde alors
-    // le chemin tel quel.
-    let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    // On ne résout le chemin que dans ce cas : sous Windows, `canonicalize`
+    // renvoie un chemin `\\?\C:\…` peu lisible dans les messages d'erreur.
+    let is_link = fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    let path = match is_link {
+        true => fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
+        false => path.to_path_buf(),
+    };
     let dir = path.parent().unwrap_or(Path::new("."));
     let name = path.file_name().unwrap_or_default().to_string_lossy();
 
-    // Nom temporaire propre à ce processus (`id()` = numéro du processus) :
-    // si deux copies de l'app tournaient, elles n'écriraient pas le même fichier.
-    let tmp = dir.join(format!("{name}.{}.tmp", std::process::id()));
+    // Nom temporaire unique : numéro du processus (`id()`) + compteur. Deux
+    // copies de l'app, ou deux écritures simultanées dans la même app,
+    // n'utilisent jamais le même fichier temporaire.
+    // `fetch_add` incrémente le compteur et renvoie l'ancienne valeur, de façon
+    // sûre même si plusieurs threads l'appellent en même temps.
+    let n = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.join(format!("{name}.{}-{n}.tmp", std::process::id()));
 
     // Fabrique d'erreurs : `io_err(&chemin)` renvoie une closure qui transforme
     // une `std::io::Error` en `AppError::Io` pour ce chemin.
@@ -69,20 +81,30 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), AppError> {
 
 /// Renomme `from` en `to` (en remplaçant `to`). Sous Windows, un antivirus ou
 /// l'indexation peuvent garder le fichier ouvert une fraction de seconde : le
-/// renommage échoue alors avec « accès refusé ». On réessaie quelques fois.
-fn rename_with_retry(from: &Path, to: &PathBuf) -> std::io::Result<()> {
+/// renommage échoue alors (« accès refusé » ou « fichier utilisé par un autre
+/// processus »). On réessaie quelques fois avant d'abandonner.
+fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     const ATTEMPTS: u32 = 5;
     let mut attempt = 1;
     loop {
         match fs::rename(from, to) {
             Ok(()) => return Ok(()),
-            Err(e) if e.kind() == ErrorKind::PermissionDenied && attempt < ATTEMPTS => {
+            Err(e) if is_transient(&e) && attempt < ATTEMPTS => {
                 std::thread::sleep(std::time::Duration::from_millis(50 * u64::from(attempt)));
                 attempt += 1;
             }
             Err(e) => return Err(e),
         }
     }
+}
+
+/// Erreur passagère de Windows : accès refusé (code 5, `PermissionDenied`) ou
+/// fichier ouvert ailleurs (`ERROR_SHARING_VIOLATION`, code 32, que Rust ne
+/// range dans aucune catégorie : on lit donc le code brut de Windows).
+fn is_transient(e: &std::io::Error) -> bool {
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    e.kind() == ErrorKind::PermissionDenied
+        || (cfg!(windows) && e.raw_os_error() == Some(ERROR_SHARING_VIOLATION))
 }
 
 #[cfg(test)]
