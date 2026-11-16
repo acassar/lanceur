@@ -348,7 +348,16 @@ fn hide_after_blur(app: AppHandle) {
                 .hide_on_blur
                 .load(Ordering::Relaxed);
             let minimized = window.is_minimized().unwrap_or(true);
-            if enabled && !minimized && !is_in_front(&window) {
+            if !enabled || minimized {
+                return;
+            }
+            if is_in_front(&window) {
+                // Fausse alerte : la fenêtre est toujours devant, mais la page a
+                // pu perdre le clavier. On le lui rend, sinon la frappe n'arrive
+                // plus dans la recherche, et un vrai départ vers une autre app ne
+                // serait plus signalé (donc plus de réduction automatique).
+                focus_webview(&window);
+            } else {
                 let _ = window.minimize();
             }
         });
