@@ -98,7 +98,7 @@ Ils sont stockés dans `%APPDATA%\io.github.acassar.lanceur\`, le dossier que Ta
 | `state.json` | l'app uniquement | récents (change à chaque lancement) |
 | `icons\<id>-<empreinte>.png` | l'app uniquement | cache des icônes extraites (`.jpg` pour les jaquettes Steam) |
 
-L'empreinte résume la source de l'icône (chemin, URL, date de modification de l'exe…) : si elle change, l'icône est recalculée. Une icône introuvable sur Internet laisse un fichier `.none`, retenté au bout de 24 h. Supprimer le dossier `icons` vide le cache.
+L'empreinte résume la source de l'icône (chemin, URL, date de modification de l'exe…) : si elle change, l'icône est recalculée. Une icône introuvable sur un site qui a répondu laisse un fichier `.none`, retenté au bout de 24 h ; sans réseau, on réessaie à l'ouverture suivante. Supprimer le dossier `icons` vide le cache.
 
 Les récents vont dans un fichier séparé pour que l'app ne réécrive pas votre `config.json` à chaque lancement.
 
@@ -187,7 +187,7 @@ enum Target {
 | `get_hotkey_status` | – | `{ hotkey, error }` | raccourci global configuré, et l'erreur s'il n'a pas pu être enregistré (invalide, ou déjà pris par une autre app) |
 
 **Icônes selon la source**
-- `icon` renseigné : ce fichier image (PNG, JPEG, ICO…) ou cette URL ; un `.exe` ou `.lnk` donne son icône Windows.
+- `icon` renseigné : ce fichier image (PNG, JPEG, ICO…) ou cette URL ; un `.exe` ou `.lnk` donne son icône Windows. Un chemin relatif se lit depuis le dossier de `config.json`.
 - `app` : l'icône que l'Explorateur affiche pour le fichier (`IShellItemImageFactory`, qui suit aussi les `.lnk`). Un nom seul (`wt.exe`) est cherché dans le `PATH`.
 - `steam` : la jaquette du jeu, lue dans le cache de Steam (`appcache\librarycache`), sinon téléchargée sur le CDN de Steam.
 - `web` : le favicon lu dans la page (`<link rel="icon">`, `apple-touch-icon`), puis `/favicon.ico` en secours.
