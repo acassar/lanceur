@@ -72,6 +72,9 @@ onMounted(async () => {
     L.selected.value = 0;
     scroller.value?.scrollTo({ top: 0 });
     searchBar.value?.focus();
+    // On relit config.json : une modification à la main (tuiles, raccourci,
+    // hideOnBlur…) s'applique ainsi dès le prochain affichage.
+    load();
   });
   // Le composant a pu disparaître pendant l'attente (rechargement à chaud).
   if (unmounted) stop();
@@ -130,7 +133,7 @@ function onKeydown(e: KeyboardEvent) {
   } else if (e.key === "Escape") {
     e.preventDefault();
     if (L.query.value) L.query.value = "";
-    else ipc.hideWindow();
+    else ipc.hideWindow().catch(console.error);
   } else if (e.key === "Tab") {
     e.preventDefault();
     L.cycleRail(e.shiftKey ? -1 : 1);
@@ -140,12 +143,19 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-/** Charge la config, puis signale un raccourci global qui n'a pas pu être enregistré. */
+/**
+ * Charge la config, puis signale un raccourci global qui n'a pas pu être
+ * enregistré. Le même message n'est montré qu'une fois, pas à chaque affichage.
+ */
+let lastHotkeyError: string | null = null;
 async function load() {
   await L.load();
   try {
     const { error } = await ipc.getHotkeyStatus();
-    if (error) showToast({ message: "Raccourci global indisponible", detail: error, error: true });
+    if (error && error !== lastHotkeyError) {
+      showToast({ message: "Raccourci global indisponible", detail: error, error: true });
+    }
+    lastHotkeyError = error;
   } catch (e) {
     console.error(e);
   }

@@ -25,6 +25,9 @@ export interface Ipc {
   openConfigFolder(): Promise<void>;
 }
 
+/** Événement émis par Rust quand la fenêtre réapparaît (`SHOWN_EVENT` dans window.rs). */
+export const WINDOW_SHOWN_EVENT = "window-shown";
+
 /** Miroir de `HotkeyStatus` dans window.rs. */
 export interface HotkeyStatus {
   hotkey: string;
@@ -60,8 +63,7 @@ function createTauriIpc(): Ipc {
     launch: (id) => invoke<string[]>("launch", { id }),
     hideWindow: () => invoke("hide_window"),
     getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
-    // Événement émis par Rust (window.rs, SHOWN_EVENT).
-    onWindowShown: (callback) => listen("window-shown", () => callback()),
+    onWindowShown: (callback) => listen(WINDOW_SHOWN_EVENT, () => callback()),
     openConfigFolder: () => invoke("open_config_folder"),
   };
 }

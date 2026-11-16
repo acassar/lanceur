@@ -42,8 +42,7 @@ pub struct WindowState {
     ///
     /// `AtomicBool` : un booléen qu'on peut lire et écrire depuis plusieurs
     /// threads sans verrou. Il est lu à chaque perte de focus, sur le thread
-    /// principal ; un verrou ici risquerait de bloquer la fenêtre (voir
-    /// [`sync_settings`]).
+    /// principal : pour un simple booléen, inutile de passer par un `Mutex`.
     hide_on_blur: AtomicBool,
 
     /// Le raccourci actuellement enregistré, et la dernière erreur.
@@ -52,12 +51,20 @@ pub struct WindowState {
     /// valeur, il faut d'abord la « prendre » avec `lock()`. Un seul thread à
     /// la fois la tient ; les autres attendent. Le verrou se relâche tout seul
     /// quand la variable qui le tient disparaît (fin du bloc).
+    ///
+    /// On ne le garde que le temps de lire ou d'écrire quelques champs, jamais
+    /// pendant un appel qui attend un autre thread (voir [`sync_settings`]).
     hotkey: Mutex<Hotkey>,
+
+    /// « Tour de parole » de [`sync_settings`] : deux lectures de la config en
+    /// même temps ne doivent pas enregistrer deux raccourcis. `Mutex<()>` ne
+    /// protège aucune donnée, seulement une portion de code.
+    syncing: Mutex<()>,
 }
 
 #[derive(Default)]
 struct Hotkey {
-    /// Texte du réglage tel qu'écrit dans config.json (`"Ctrl+Alt+Space"`).
+    /// Texte du raccourci actif, tel qu'écrit dans config.json (`"Ctrl+Alt+Space"`).
     text: String,
     /// Raccourci réellement enregistré auprès de Windows, s'il y en a un.
     registered: Option<Shortcut>,
@@ -91,9 +98,10 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Applique les réglages de config.json qui concernent la fenêtre.
 ///
-/// Appelée au démarrage, puis à chaque lecture de la config (`get_config`) :
-/// si vous changez `hotkey` ou `hideOnBlur` à la main, recharger la config
-/// suffit, sans redémarrer l'app.
+/// Appelée au démarrage, puis à chaque lecture de la config (`get_config`).
+/// Le front relit la config chaque fois que la fenêtre réapparaît : si vous
+/// changez `hotkey` ou `hideOnBlur` à la main, ils s'appliquent au prochain
+/// affichage, sans redémarrer l'app.
 ///
 /// Si le nouveau raccourci est invalide ou déjà pris par une autre app, on
 /// garde l'ancien (s'il y en avait un) et on retient l'erreur pour l'afficher.
@@ -106,49 +114,57 @@ pub fn sync_settings(app: &AppHandle, settings: &Settings) {
         .hide_on_blur
         .store(settings.hide_on_blur, Ordering::Relaxed);
 
-    // On garde le verrou pendant tout l'enregistrement : deux lectures de la
-    // config en même temps ne doivent pas enregistrer deux raccourcis.
-    //
-    // Attention au piège : `register` attend que le thread principal ait fait
-    // le travail. Si le thread principal attendait lui-même ce verrou, les deux
-    // s'attendraient pour toujours (*deadlock*). C'est pour ça que le code qui
-    // tourne sur le thread principal (perte de focus, raccourci) ne touche
-    // jamais à ce `Mutex`, seulement à l'`AtomicBool`.
-    let mut hotkey = lock(&state.hotkey);
-    hotkey.text = settings.hotkey.clone();
+    // Une seule synchronisation à la fois. Ce verrou n'est jamais pris par du
+    // code du thread principal, sauf au démarrage, quand rien d'autre ne tourne.
+    let _syncing = lock(&state.syncing);
 
-    let wanted = match parse_hotkey(&settings.hotkey) {
-        Ok(shortcut) => shortcut,
-        Err(message) => {
-            hotkey.error = Some(message);
-            return;
+    // Résultat à enregistrer dans l'état : `Ok(Some(..))` nouveau raccourci,
+    // `Ok(None)` rien à changer, `Err(message)` échec.
+    let outcome = match parse_hotkey(&settings.hotkey) {
+        Err(message) => Err(message),
+        Ok(wanted) => {
+            // Le bloc `{ … }` limite la durée du verrou à cette seule lecture.
+            let current = { lock(&state.hotkey).registered };
+            if current == Some(wanted) {
+                Ok(None)
+            } else {
+                // Attention au piège : `register` attend que le thread
+                // principal ait fait le travail. Si on tenait `state.hotkey`
+                // pendant ce temps et que le thread principal voulait le lire
+                // (commande `get_hotkey_status`), chacun attendrait l'autre
+                // pour toujours (*deadlock*). On appelle donc `register` sans
+                // tenir ce verrou.
+                let manager = app.global_shortcut();
+                match manager.register(wanted) {
+                    Ok(()) => {
+                        // Le nouveau est pris : on libère l'ancien.
+                        if let Some(old) = current {
+                            let _ = manager.unregister(old);
+                        }
+                        Ok(Some(wanted))
+                    }
+                    Err(e) => Err(format!(
+                        "Le raccourci « {} » n'a pas pu être enregistré ({e}). \
+                         Il est peut-être déjà utilisé par une autre application : \
+                         choisissez-en un autre dans config.json (réglage hotkey).",
+                        settings.hotkey
+                    )),
+                }
+            }
         }
     };
-    // Déjà enregistré : rien à faire.
-    if hotkey.registered == Some(wanted) {
-        hotkey.error = None;
-        return;
-    }
 
-    let manager = app.global_shortcut();
-    match manager.register(wanted) {
-        Ok(()) => {
-            // Le nouveau est pris : on libère l'ancien. `take()` vide
-            // l'`Option` et nous donne ce qu'elle contenait.
-            if let Some(old) = hotkey.registered.take() {
-                let _ = manager.unregister(old);
+    let mut hotkey = lock(&state.hotkey);
+    match outcome {
+        Ok(new) => {
+            if let Some(shortcut) = new {
+                hotkey.registered = Some(shortcut);
             }
-            hotkey.registered = Some(wanted);
+            hotkey.text = settings.hotkey.clone();
             hotkey.error = None;
         }
-        Err(e) => {
-            hotkey.error = Some(format!(
-                "Le raccourci « {} » n'a pas pu être enregistré ({e}). \
-                 Il est peut-être déjà utilisé par une autre application : \
-                 choisissez-en un autre dans config.json (réglage hotkey).",
-                settings.hotkey
-            ));
-        }
+        // L'ancien raccourci (et son texte) reste actif.
+        Err(message) => hotkey.error = Some(message),
     }
 }
 
