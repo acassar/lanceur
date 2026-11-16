@@ -140,6 +140,10 @@ export function useLauncher() {
     // Deux clics rapides : les réponses peuvent arriver dans le désordre.
     // Une réponse plus ancienne que la dernière demande est ignorée.
     if (request !== favoriteRequest || !config.value) return;
+    // Un rechargement parti avant cette écriture rapporterait les anciens
+    // favoris : on l'invalide (le fichier enregistré déclenche de toute façon
+    // un nouveau rechargement).
+    loadRequest++;
     // Ajouter/retirer un favori change la section Favoris et décale les index :
     // on mémorise la tuile sélectionnée pour la retrouver ensuite.
     const before = entries.value[selected.value];

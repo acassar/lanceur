@@ -33,21 +33,43 @@ async fn get_config(app: tauri::AppHandle) -> Result<Config, AppError> {
     // `?` : si `config_dir` renvoie une erreur, `get_config` s'arrête et la
     // renvoie telle quelle. Sinon, `dir` reçoit le chemin.
     let dir = config::config_dir(&app)?;
+    // Lecture du disque, réglages et ménage des icônes : du travail qui attend
+    // (fichiers, Windows), donc sur un thread d'attente (`spawn_blocking`).
+    let path = dir.join(config::FILE_NAME);
+    tauri::async_runtime::spawn_blocking(move || reload(&app, &dir))
+        .await
+        // `await` échoue seulement si le thread a paniqué.
+        .unwrap_or_else(|e| {
+            Err(AppError::Invalid {
+                path,
+                problems: vec![format!("erreur interne pendant la lecture : {e}")],
+            })
+        })
+}
+
+/// Un seul rechargement à la fois (voir [`reload`]). `Mutex<()>` ne protège
+/// aucune donnée, seulement une portion de code.
+static RELOADING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Le travail de `get_config`.
+///
+/// Deux rechargements peuvent arriver presque ensemble (fenêtre réaffichée
+/// pendant que vous enregistrez config.json). Sans verrou, le plus ancien
+/// pourrait appliquer ses réglages *après* le plus récent et remettre l'ancien
+/// raccourci. Avec le verrou, lecture + application se font d'un bloc, l'une
+/// après l'autre : le dernier à lire le fichier est aussi le dernier à appliquer.
+fn reload(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<Config, AppError> {
+    let _reloading = RELOADING.lock().unwrap_or_else(|p| p.into_inner());
     // Lecture du disque à chaque fois (pas de copie en mémoire) : c'est la
     // commande de rechargement. Elle met aussi à jour la copie mémorisée dont
     // se servent `get_icon` et `get_recents` (voir `config::load_cached`).
-    let config = config::load_and_remember(&dir)?;
-    // Ménage du cache d'icônes : celles des tuiles retirées de la config sont
-    // supprimées. En arrière-plan et sans attendre (`spawn_blocking` sans
-    // `.await`) : la config part tout de suite vers le front. La closure reçoit
-    // sa propre copie des tuiles (`clone`), car `config` est renvoyée plus bas.
-    let tiles = config.tiles.clone();
-    let icons_dir = dir.clone();
-    tauri::async_runtime::spawn_blocking(move || icons::remove_orphans(&icons_dir, &tiles));
+    let config = config::load_and_remember(dir)?;
     // Le raccourci et `hideOnBlur` suivent la config qu'on vient de lire.
     // Si le fichier est invalide, on n'arrive pas ici (`?` au-dessus) : les
     // derniers réglages valides restent en place.
-    window::sync_settings(&app, &config.settings);
+    window::sync_settings(app, &config.settings);
+    // Ménage du cache d'icônes : celles des tuiles retirées sont supprimées.
+    icons::remove_orphans(dir, &config.tiles);
     // Dernière expression sans `;` : c'est la valeur renvoyée par la fonction.
     Ok(config)
 }

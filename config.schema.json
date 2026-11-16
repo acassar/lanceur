@@ -10,7 +10,10 @@
   "additionalProperties": false,
   "properties": {
     "$schema": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Lien vers ce schéma : VS Code propose l'autocomplétion et signale les erreurs."
     },
     "version": {
@@ -155,7 +158,10 @@
           "description": "Id d'une catégorie de \"categories\"."
         },
         "icon": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Optionnel : image (PNG, JPEG, ICO…), .exe/.lnk ou URL https:// qui remplace l'icône trouvée automatiquement."
         },
         "type": {

@@ -372,7 +372,15 @@ fn shell_execute(file: &Path, params: &str, dir: Option<&Path>) -> Result<(), Ap
                 // `..Default::default()` : tous les autres champs à zéro.
                 ..Default::default()
             };
-            let outcome = ShellExecuteExW(&mut info).map_err(|e| e.message());
+            let outcome = ShellExecuteExW(&mut info).map_err(|e| {
+                // « Non » cliqué sur l'invite UAC : `ERROR_CANCELLED` (1223),
+                // emballé par Windows dans un code HRESULT 0x800704C7.
+                if e.code().0 as u32 == 0x8007_04C7 {
+                    "lancement annulé (autorisation refusée)".to_string()
+                } else {
+                    e.message()
+                }
+            });
 
             // On ne libère COM que si notre appel l'a bien initialisé.
             if com.is_ok() {

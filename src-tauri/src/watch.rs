@@ -54,13 +54,23 @@ pub fn start(app: &AppHandle, dir: &Path) {
     let handle = app.clone();
     let on_events = move |result: DebounceEventResult| match result {
         // `iter().any(…)` : vrai si au moins un événement concerne config.json.
-        Ok(events) if events.iter().any(|e| is_config_file(&e.path)) => {
+        // Un événement sans nom de fichier (trop de changements d'un coup, la
+        // mémoire tampon de Windows a débordé) compte aussi : un rechargement
+        // de trop ne coûte rien, une modification manquée si.
+        Ok(events)
+            if events
+                .iter()
+                .any(|e| e.path.as_os_str().is_empty() || is_config_file(&e.path)) =>
+        {
             // Ce code tourne sur le thread du `Debouncer`, pas sur celui de
             // la fenêtre : `emit` sait envoyer l'événement depuis n'importe où.
             let _ = handle.emit(CONFIG_CHANGED_EVENT, ());
         }
         Ok(_) => {}
-        Err(e) => eprintln!("surveillance de config.json : {e}"),
+        Err(e) => {
+            eprintln!("surveillance de config.json : {e}");
+            let _ = handle.emit(CONFIG_CHANGED_EVENT, ());
+        }
     };
 
     let watcher = new_debouncer(DEBOUNCE, on_events).and_then(|mut debouncer| {
