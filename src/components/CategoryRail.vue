@@ -12,8 +12,7 @@ const active = defineModel<RailKey>({ required: true });
       :key="item.key"
       type="button"
       tabindex="-1"
-      :aria-pressed="item.key === active"
-      @mousedown.prevent
+      :aria-current="item.key === active ? 'true' : undefined"
       @click="active = item.key"
     >
       {{ item.label }}<span>{{ item.count }}</span>
@@ -37,6 +36,6 @@ button {
 }
 button span { font: 11px var(--font-mono); color: var(--faint); }
 button:hover { background: var(--surface); color: var(--fg); }
-button[aria-pressed="true"] { background: var(--surface-2); color: var(--fg); box-shadow: inset 2px 0 0 var(--accent); }
+button[aria-current="true"] { background: var(--surface-2); color: var(--fg); box-shadow: inset 2px 0 0 var(--accent); }
 .foot { margin-top: auto; padding: 8px 10px 0; font-size: 11px; color: var(--faint); line-height: 1.5; }
 </style>

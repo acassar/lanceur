@@ -23,7 +23,6 @@ const segments = computed(() => highlight(props.tile.name, props.query));
     class="tile"
     :class="{ sel: selected, compact }"
     :data-index="index"
-    @mousedown.prevent
     @mousemove="emit('hover')"
     @click="emit('launch')"
   >
