@@ -95,6 +95,10 @@ export function createMockIpc(
       if (!favorite && has) config.favorites = config.favorites.filter((f) => f !== id);
       return [...config.favorites];
     },
+    // Pas d'extraction d'icônes dans le navigateur : les monogrammes restent.
+    async getIcon() {
+      return null;
+    },
     async hideWindow() {
       console.info("[ipc mock] hide_window");
     },

@@ -96,7 +96,9 @@ Ils sont stockés dans `%APPDATA%\io.github.acassar.lanceur\`, le dossier que Ta
 |---|---|---|
 | `config.json` | **vous** (à la main) + l'app pour les favoris | réglages, catégories, tuiles, favoris |
 | `state.json` | l'app uniquement | récents (change à chaque lancement) |
-| `icons\<id>.png` | l'app uniquement | cache des icônes extraites |
+| `icons\<id>-<empreinte>.png` | l'app uniquement | cache des icônes extraites (`.jpg` pour les jaquettes Steam) |
+
+L'empreinte résume la source de l'icône (chemin, URL, date de modification de l'exe…) : si elle change, l'icône est recalculée. Une icône introuvable sur un site qui a répondu laisse un fichier `.none`, retenté au bout de 24 h ; sans réseau, on réessaie à l'ouverture suivante. Supprimer le dossier `icons` vide le cache.
 
 Les récents vont dans un fichier séparé pour que l'app ne réécrive pas votre `config.json` à chaque lancement.
 
@@ -179,10 +181,18 @@ enum Target {
 | `get_recents` | – | `string[]` | ids des derniers lancements |
 | `launch` | `id` | `()` ou erreur | lance la tuile, met à jour les récents |
 | `set_favorite` | `id`, `favorite` | `string[]` | met la tuile en favori (`true`) ou l'en retire (`false`) et réécrit `config.json` ; répéter l'appel ne change rien |
-| `get_icon` | `id` | chemin PNG ou `null` | extrait ou télécharge l'icône, avec cache |
+| `get_icon` | `id` | `data:` URL ou `null` | extrait ou télécharge l'icône, avec cache ; `null` → monogramme |
 | `open_config_folder` | – | `()` | ouvre le dossier dans l'Explorateur |
 | `hide_window` | – | `()` | réduit la fenêtre (Échap, après lancement) ; l'icône reste dans la barre des tâches |
 | `get_hotkey_status` | – | `{ hotkey, error }` | raccourci global configuré, et l'erreur s'il n'a pas pu être enregistré (invalide, ou déjà pris par une autre app) |
+
+**Icônes selon la source**
+- `icon` renseigné : ce fichier image (PNG, JPEG, ICO…) ou cette URL ; un `.exe` ou `.lnk` donne son icône Windows. Un chemin relatif se lit depuis le dossier de `config.json`.
+- `app` : l'icône que l'Explorateur affiche pour le fichier (`IShellItemImageFactory`, qui suit aussi les `.lnk`). Un nom seul (`wt.exe`) est cherché dans le `PATH`.
+- `steam` : la jaquette du jeu, lue dans le cache de Steam (`appcache\librarycache`), sinon téléchargée sur le CDN de Steam.
+- `web` : le favicon lu dans la page (`<link rel="icon">`, `apple-touch-icon`), puis `/favicon.ico` en secours.
+
+Les icônes arrivent au front en `data:` URL, que la CSP autorise déjà (`img-src … data:`). Le protocole `asset:` n'a donc pas besoin d'être ouvert : le front ne peut toujours lire aucun fichier du disque.
 
 Événement émis par Rust vers le front : `window-shown`. Le front y vide la recherche et redonne le focus au champ.
 

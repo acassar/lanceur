@@ -28,6 +28,15 @@ serde_path_to_error = "0.1"
 # unique (relancer l'exe réaffiche la fenêtre déjà ouverte).
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
+# Étape 6 (icônes) :
+# - `reqwest` : client HTTP *async*, pour télécharger les favicons et les
+#   jaquettes Steam. Sous Windows, il utilise le TLS du système (SChannel).
+# - `image` : décoder (PNG, ICO, JPEG…), redimensionner et réencoder les images.
+#   On n'active que les formats utiles, pour compiler moins de code.
+# - `base64` : transformer le PNG en `data:` URL pour l'afficher dans le front.
+reqwest = "0.12"
+image = { version = "0.25", default-features = false, features = ["png", "ico", "jpeg", "gif", "bmp", "webp"] }
+base64 = "0.22"
 
 # Dépendances compilées uniquement pour Windows : l'API Win32 (ShellExecuteExW
 # pour ouvrir les .lnk et les URL steam://). Chaque « feature » active une
@@ -35,8 +44,11 @@ tauri-plugin-single-instance = "2"
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
   "Win32_Foundation",
+  # étape 6 : lire les pixels d'une image Windows (HBITMAP → GetDIBits)
+  "Win32_Graphics_Gdi",
   "Win32_System_Com",
-  # requis par la struct SHELLEXECUTEINFOW (champ hkeyClass)
+  # requis par la struct SHELLEXECUTEINFOW (champ hkeyClass) ; sert aussi à
+  # l'étape 6 pour lire le dossier de Steam dans le registre
   "Win32_System_Registry",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
@@ -48,7 +60,9 @@ windows = { version = "0.62", features = [
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# `unwind` (et non `abort`) : si une crate panique (une image piégée
+# téléchargée sur un site…), seule la tâche concernée s'arrête ; l'app continue.
+panic = "unwind"
 strip = true
 
 [dev-dependencies]

@@ -9,6 +9,7 @@ mod config;
 mod error;
 mod favorites;
 mod fsutil;
+mod icons;
 mod launch;
 mod state;
 mod window;
@@ -114,6 +115,27 @@ async fn set_favorite(
         .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
 }
 
+/// Commande `get_icon` : `invoke("get_icon", { id: "discord" })`.
+///
+/// Renvoie l'icône de la tuile en `data:` URL (`data:image/png;base64,…`), ou
+/// `null` si aucune n'a été trouvée : le front garde alors le monogramme.
+/// La 1ʳᵉ fois, l'icône est extraite ou téléchargée puis mise en cache dans
+/// `icons\` ; ensuite, elle est simplement relue (voir icons.rs).
+///
+/// Le front n'envoie que l'id : c'est Rust qui relit la config pour savoir quel
+/// fichier ou quel site lire. Le front ne peut donc pas lui faire lire autre chose.
+#[tauri::command]
+async fn get_icon(app: tauri::AppHandle, id: String) -> Option<String> {
+    // `.ok()?` : en cas d'erreur (config invalide…), on renvoie `None`. Le
+    // message d'erreur de la config est déjà affiché par `get_config`.
+    let dir = config::config_dir(&app).ok()?;
+    let config = config::load_or_create(&dir).ok()?;
+    // `into_iter()` consomme la liste : on récupère la tuile elle-même (pas
+    // une référence), qu'on peut donner à la tâche async.
+    let tile = config.tiles.into_iter().find(|t| t.id == id)?;
+    icons::icon_data_url(dir, tile).await
+}
+
 /// Commande `open_config_folder` : ouvre le dossier de `config.json` dans
 /// l'Explorateur Windows, pour pouvoir éditer le fichier facilement.
 #[tauri::command]
@@ -211,6 +233,7 @@ pub fn run() {
             get_recents,
             launch,
             set_favorite,
+            get_icon,
             open_config_folder,
             hide_window,
             get_hotkey_status

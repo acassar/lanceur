@@ -238,7 +238,7 @@ fn browser_program(browser: &str) -> (PathBuf, bool) {
 
 /// Refuse les URL qui ne sont pas `http(s)://`, ou qui contiennent des espaces
 /// ou des guillemets : elles pourraient ajouter des options au navigateur.
-fn check_web_url(url: &str) -> Result<(), AppError> {
+pub fn check_web_url(url: &str) -> Result<(), AppError> {
     let lower = url.to_ascii_lowercase();
     let scheme_ok = lower.starts_with("https://") || lower.starts_with("http://");
     let chars_ok = !url.chars().any(|c| c.is_whitespace() || c == '"');
