@@ -100,6 +100,8 @@ Ils sont stockés dans `%APPDATA%\io.github.acassar.lanceur\`, le dossier que Ta
 
 Les récents vont dans un fichier séparé pour que l'app ne réécrive pas votre `config.json` à chaque lancement.
 
+Quand vous ajoutez ou retirez un favori, l'app ne remplace que le tableau `"favorites"` dans `config.json` (ou l'ajoute avant `"tiles"` s'il manque) : votre mise en forme, vos lignes vides et l'ordre des champs sont conservés. Si le fichier est invalide à ce moment-là, il n'est pas touché et l'erreur s'affiche.
+
 ### `config.json`
 
 ```jsonc
@@ -176,7 +178,7 @@ enum Target {
 | `get_config` | – | `Config` | lit (ou crée) `config.json` |
 | `get_recents` | – | `string[]` | ids des derniers lancements |
 | `launch` | `id` | `()` ou erreur | lance la tuile, met à jour les récents |
-| `toggle_favorite` | `id` | `string[]` | ajoute ou retire un favori et réécrit `config.json` |
+| `set_favorite` | `id`, `favorite` | `string[]` | met la tuile en favori (`true`) ou l'en retire (`false`) et réécrit `config.json` ; répéter l'appel ne change rien |
 | `get_icon` | `id` | chemin PNG ou `null` | extrait ou télécharge l'icône, avec cache |
 | `open_config_folder` | – | `()` | ouvre le dossier dans l'Explorateur |
 | `hide_window` | – | `()` | réduit la fenêtre (Échap, après lancement) ; l'icône reste dans la barre des tâches |
@@ -201,7 +203,7 @@ Chaque étape se termine par quelque chose que vous pouvez **tester vous-même**
 | 2 | **Config réelle** : `config.rs`, commande `get_config`, config d'exemple, erreurs de JSON affichées | modifier `config.json`, rouvrir l'app : les tuiles suivent ; casser le JSON : message clair | structs, `serde`, `Result` et `?`, ownership de base |
 | 3 | **Lancement** : `launch.rs` pour steam, exe, lnk et web ; récents dans `state.json` | lancer un jeu, Discord, VS Code (.lnk) et Instagram en fenêtre d'app | `enum` + `match`, `std::process`, appel Win32 |
 | 4 | **Fenêtre** : raccourci global, afficher/masquer, focus auto, masquage après lancement et à la perte de focus, instance unique, centrage sur l'écran actif | Ctrl+Alt+Espace depuis un jeu ou un navigateur ; relancer l'exe réaffiche la fenêtre | plugins, état partagé (`State<Mutex<…>>`), closures |
-| 5 | **Favoris** : `toggle_favorite` réécrit `config.json` | étoile ou Ctrl+D, fermer et rouvrir : les favoris sont toujours là | écriture atomique de fichier, gestion d'erreurs |
+| 5 | **Favoris** : `set_favorite` réécrit `config.json` | étoile ou Ctrl+D, fermer et rouvrir : les favoris sont toujours là | écriture atomique de fichier, gestion d'erreurs |
 | 6 | **Icônes** : extraction depuis les exe/lnk, favicon pour le web, cache PNG, monogramme de secours | les vraies icônes apparaissent ; 2ᵉ ouverture instantanée grâce au cache | `unsafe` et FFI Win32 (encadré), async avec `reqwest` |
 | 7 | **Finitions + v0.1.0** : rechargement de la config, `config.schema.json`, README, tag `v0.1.0` | une Release GitHub contient l'installeur `.msi` / `-setup.exe` | – |
 

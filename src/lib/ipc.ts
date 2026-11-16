@@ -10,8 +10,11 @@ export interface Ipc {
   getRecents(): Promise<string[]>;
   /** Lance la tuile et renvoie la nouvelle liste des récents. */
   launch(id: string): Promise<string[]>;
-  /** Ajoute ou retire un favori et renvoie la nouvelle liste. */
-  toggleFavorite(id: string): Promise<string[]>;
+  /**
+   * Met une tuile en favori (`favorite = true`) ou l'en retire, réécrit
+   * config.json et renvoie la nouvelle liste. Répéter l'appel ne change rien.
+   */
+  setFavorite(id: string, favorite: boolean): Promise<string[]>;
   /** Réduit la fenêtre dans la barre des tâches (Échap, après un lancement). */
   hideWindow(): Promise<void>;
   /** Raccourci global configuré, et pourquoi il n'a pas pu être enregistré le cas échéant. */
@@ -55,12 +58,12 @@ export function toIpcError(e: unknown): IpcError {
 }
 
 function createTauriIpc(): Ipc {
-  // Étape 4 : tout est réel sauf les favoris, simulés en mémoire jusqu'à l'étape 5.
-  const simulated = createMockIpc(() => invoke<Config>("get_config"), []);
+  // Étape 5 : toutes les commandes sont réelles, plus rien n'est simulé.
   return {
-    ...simulated,
+    getConfig: () => invoke<Config>("get_config"),
     getRecents: () => invoke<string[]>("get_recents"),
     launch: (id) => invoke<string[]>("launch", { id }),
+    setFavorite: (id, favorite) => invoke<string[]>("set_favorite", { id, favorite }),
     hideWindow: () => invoke("hide_window"),
     getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
     onWindowShown: (callback) => listen(WINDOW_SHOWN_EVENT, () => callback()),

@@ -7,6 +7,8 @@
 
 mod config;
 mod error;
+mod favorites;
+mod fsutil;
 mod launch;
 mod state;
 mod window;
@@ -93,6 +95,23 @@ fn launch_tile(dir: &std::path::Path, id: &str) -> Result<Vec<String>, AppError>
         state::load(dir)
     });
     Ok(state::visible_recents(&state, &config))
+}
+
+/// Commande `set_favorite` : `invoke("set_favorite", { id: "cs2", favorite: true })`.
+///
+/// Met la tuile en favori (ou l'en retire) en réécrivant `config.json`, et
+/// renvoie la nouvelle liste des favoris. Le fichier est lu, modifié et écrit
+/// sur un thread d'attente (`spawn_blocking`), comme pour `launch`.
+#[tauri::command]
+async fn set_favorite(
+    app: tauri::AppHandle,
+    id: String,
+    favorite: bool,
+) -> Result<Vec<String>, AppError> {
+    let dir = config::config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || favorites::set(&dir, &id, favorite))
+        .await
+        .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
 }
 
 /// Commande `open_config_folder` : ouvre le dossier de `config.json` dans
@@ -191,6 +210,7 @@ pub fn run() {
             get_config,
             get_recents,
             launch,
+            set_favorite,
             open_config_folder,
             hide_window,
             get_hotkey_status

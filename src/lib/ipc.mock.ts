@@ -2,8 +2,7 @@
 // gardées en mémoire. Elle permet de développer et tester toute l'interface dans
 // un navigateur (npm run dev), sans Rust.
 //
-// Dans l'app, ipc.ts lui passe la vraie lecture de config.json (commande Rust
-// get_config) : seules les commandes pas encore écrites restent simulées.
+// Dans l'app (Tauri), ipc.ts utilise les vraies commandes Rust à la place.
 import type { Ipc } from "./ipc";
 import type { Config } from "./types";
 
@@ -60,8 +59,8 @@ const SAMPLE: Config = {
 };
 
 /**
- * @param loadConfig d'où vient la config : les données d'exemple par défaut,
- *   la commande Rust get_config dans l'app.
+ * @param loadConfig d'où vient la config : les données d'exemple par défaut
+ *   (les tests en passent une autre).
  * @param initialRecents récents simulés au démarrage.
  */
 export function createMockIpc(
@@ -89,11 +88,11 @@ export function createMockIpc(
       recents = [id, ...recents.filter((r) => r !== id)].slice(0, config?.settings.recentsCount ?? 4);
       return [...recents];
     },
-    async toggleFavorite(id) {
+    async setFavorite(id, favorite) {
       if (!config) return [];
-      const i = config.favorites.indexOf(id);
-      if (i >= 0) config.favorites.splice(i, 1);
-      else config.favorites.push(id);
+      const has = config.favorites.includes(id);
+      if (favorite && !has) config.favorites.push(id);
+      if (!favorite && has) config.favorites = config.favorites.filter((f) => f !== id);
       return [...config.favorites];
     },
     async hideWindow() {

@@ -119,12 +119,23 @@ export function useLauncher() {
     rail.value = keys[(i + step + keys.length) % keys.length];
   }
 
+  /** Numéro de la dernière demande de favori : seule sa réponse est appliquée. */
+  let favoriteRequest = 0;
+
   async function toggleFavorite(id: string) {
     if (!config.value) return;
+    // On envoie l'état voulu (l'inverse de ce que montre l'étoile), pas « inverse » :
+    // le résultat correspond toujours à ce que l'utilisateur voit à l'écran.
+    const favorite = !favoriteIds.value.has(id);
+    const request = ++favoriteRequest;
+    const favorites = await ipc.setFavorite(id, favorite);
+    // Deux clics rapides : les réponses peuvent arriver dans le désordre.
+    // Une réponse plus ancienne que la dernière demande est ignorée.
+    if (request !== favoriteRequest || !config.value) return;
     // Ajouter/retirer un favori change la section Favoris et décale les index :
     // on mémorise la tuile sélectionnée pour la retrouver ensuite.
     const before = entries.value[selected.value];
-    config.value.favorites = await ipc.toggleFavorite(id);
+    config.value.favorites = favorites;
     if (!before) return;
     const list = entries.value;
     let i = list.findIndex((e) => e.section === before.section && e.tile.id === before.tile.id);

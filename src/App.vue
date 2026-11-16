@@ -108,7 +108,7 @@ async function toggleFavorite(id: string) {
   try {
     await L.toggleFavorite(id);
   } catch (e) {
-    showToast({ message: "Favori non enregistré", detail: String(e), error: true });
+    showToast({ message: "Favori non enregistré", detail: toIpcError(e).message, error: true });
   }
 }
 

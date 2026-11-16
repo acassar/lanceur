@@ -37,7 +37,7 @@ const SUPPORTED_VERSION: u32 = 1;
 //
 // `#[derive(...)]` demande au compilateur d'écrire du code à notre place :
 // - `Deserialize` : JSON -> struct (lecture du fichier) ;
-// - `Serialize`   : struct -> JSON (envoi au front, réécriture à l'étape 5) ;
+// - `Serialize`   : struct -> JSON (envoi au front) ;
 // - `Debug`       : affichage technique, pratique dans les tests ;
 // - `Clone`       : permet de dupliquer la valeur avec `.clone()` ;
 // - `PartialEq`   : permet de comparer avec `==` (utile dans les tests).
@@ -55,7 +55,6 @@ const SUPPORTED_VERSION: u32 = 1;
 pub struct Config {
     /// Lien vers le JSON Schema pour l'autocomplétion dans VS Code (étape 7).
     /// `Option<String>` : la valeur peut être absente (`None`) ou présente (`Some(..)`).
-    /// On la garde pour ne pas la perdre quand l'app réécrira le fichier (étape 5).
     #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
 
@@ -188,7 +187,8 @@ pub fn load_or_create(dir: &Path) -> Result<Config, AppError> {
 }
 
 /// Lit le fichier en texte, en convertissant l'erreur éventuelle.
-fn read(path: &Path) -> Result<String, AppError> {
+/// `pub(crate)` : visible dans toute l'app (favorites.rs), mais pas au-delà.
+pub(crate) fn read(path: &Path) -> Result<String, AppError> {
     fs::read_to_string(path).map_err(|source| read_error(path.to_path_buf(), source))
 }
 

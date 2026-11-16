@@ -41,3 +41,14 @@ describe("createMockIpc, fenêtre", () => {
     expect(typeof stop).toBe("function");
   });
 });
+
+describe("createMockIpc, favoris", () => {
+  it("setFavorite est idempotent", async () => {
+    const ipc = createMockIpc();
+    const { favorites } = await ipc.getConfig();
+    expect(await ipc.setFavorite("bg3", true)).toEqual([...favorites, "bg3"]);
+    expect(await ipc.setFavorite("bg3", true)).toEqual([...favorites, "bg3"]);
+    expect(await ipc.setFavorite("bg3", false)).toEqual(favorites);
+    expect(await ipc.setFavorite("bg3", false)).toEqual(favorites);
+  });
+});
