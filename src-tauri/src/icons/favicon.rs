@@ -13,7 +13,7 @@
 use image::DynamicImage;
 use reqwest::Url;
 
-use super::{decode, http_client, is_http_url};
+use super::{Failure, decode, http_client, is_http_url, on_blocking};
 
 /// Taille maximale lue pour une page HTML. Les balises `<link>` sont dans le
 /// `<head>`, au début : inutile de télécharger toute la page.
@@ -23,7 +23,7 @@ const MAX_HTML: usize = 512 * 1024;
 const MAX_IMAGE: usize = 2 * 1024 * 1024;
 
 /// Trouve et décode le favicon de la page `page_url`.
-pub async fn fetch(page_url: &str) -> Result<DynamicImage, String> {
+pub async fn fetch(page_url: &str) -> Result<DynamicImage, Failure> {
     let url = Url::parse(page_url).map_err(|e| format!("{page_url} : {e}"))?;
 
     // Si la page ne répond pas, on tente quand même `/favicon.ico`.
@@ -38,7 +38,7 @@ pub async fn fetch(page_url: &str) -> Result<DynamicImage, String> {
             // lecture, les caractères invalides deviennent `�`.
             candidates = icon_links(&String::from_utf8_lossy(&bytes), &base);
         }
-        Err(e) => eprintln!("favicon : page {page_url} illisible : {e}"),
+        Err(e) => eprintln!("favicon : page {page_url} illisible : {}", e.message),
     }
     for root in [&base, &url] {
         if let Ok(ico) = root.join("/favicon.ico")
@@ -48,21 +48,36 @@ pub async fn fetch(page_url: &str) -> Result<DynamicImage, String> {
         }
     }
 
-    let mut last_error = String::from("aucune icône trouvée");
+    // `offline` reste `true` tant que le site a été injoignable à chaque essai.
+    let mut failure = Failure {
+        message: "aucune icône trouvée".into(),
+        offline: true,
+    };
     for candidate in candidates {
-        // `and_then` enchaîne : si le téléchargement réussit, on décode.
-        match download(candidate.as_str()).await.and_then(|b| decode(&b)) {
+        let result = match download(candidate.as_str()).await {
+            // Décodage sur un thread d'attente : c'est un calcul lourd.
+            Ok(bytes) => on_blocking(move || decode(&bytes))
+                .await
+                .map_err(Failure::from),
+            Err(e) => Err(e),
+        };
+        match result {
             Ok(image) => return Ok(image),
-            Err(e) => last_error = format!("{candidate} : {e}"),
+            Err(e) => {
+                failure = Failure {
+                    message: format!("{candidate} : {}", e.message),
+                    offline: failure.offline && e.offline,
+                }
+            }
         }
     }
-    Err(last_error)
+    Err(failure)
 }
 
 /// Télécharge une image (au plus [`MAX_IMAGE`] octets).
-pub async fn download(url: &str) -> Result<Vec<u8>, String> {
+pub async fn download(url: &str) -> Result<Vec<u8>, Failure> {
     if !is_http_url(url) {
-        return Err(format!("URL refusée : {url}"));
+        return Err(format!("URL refusée : {url}").into());
     }
     let url = Url::parse(url).map_err(|e| e.to_string())?;
     Ok(get_limited(url, MAX_IMAGE, false).await?.1)
@@ -73,13 +88,15 @@ pub async fn download(url: &str) -> Result<Vec<u8>, String> {
 ///
 /// Avec `truncate`, un contenu trop long est coupé (une page HTML : le début
 /// suffit). Sinon, il est refusé (une image coupée serait illisible).
-async fn get_limited(url: Url, max: usize, truncate: bool) -> Result<(Url, Vec<u8>), String> {
-    let mut response = http_client()
+async fn get_limited(url: Url, max: usize, truncate: bool) -> Result<(Url, Vec<u8>), Failure> {
+    let client = http_client().ok_or_else(|| "client HTTP indisponible".to_string())?;
+    let mut response = client
         .get(url)
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        // Une réponse 404 ou 500 devient une erreur.
+        .map_err(network_failure)?
+        // Une réponse 404 ou 500 devient une erreur (le serveur a répondu :
+        // ce n'est pas un problème de réseau).
         .error_for_status()
         .map_err(|e| e.to_string())?;
     let final_url = response.url().clone();
@@ -88,17 +105,26 @@ async fn get_limited(url: Url, max: usize, truncate: bool) -> Result<(Url, Vec<u
     // On lit la réponse morceau par morceau (`chunk`), pour pouvoir s'arrêter
     // dès qu'on dépasse la limite au lieu de tout charger en mémoire.
     // `Ok(Some(chunk))` : un morceau ; `Ok(None)` : fin de la réponse.
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+    while let Some(chunk) = response.chunk().await.map_err(network_failure)? {
         bytes.extend_from_slice(&chunk);
         if bytes.len() > max {
             if truncate {
                 bytes.truncate(max);
                 break;
             }
-            return Err(format!("fichier trop gros (plus de {} Ko)", max / 1024));
+            return Err(format!("fichier trop gros (plus de {} Ko)", max / 1024).into());
         }
     }
     Ok((final_url, bytes))
+}
+
+/// Erreur `reqwest` → [`Failure`]. Connexion impossible ou délai dépassé :
+/// le réseau est sans doute absent, l'échec est marqué `offline`.
+fn network_failure(e: reqwest::Error) -> Failure {
+    Failure {
+        offline: e.is_connect() || e.is_timeout(),
+        message: e.to_string(),
+    }
 }
 
 /// Une icône annoncée par la page, avec sa taille estimée.

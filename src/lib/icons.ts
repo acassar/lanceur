@@ -19,11 +19,11 @@ export function iconKey(tile: Tile): string {
 
 export function createIconCache(fetch: Fetch) {
   const pending = new Map<string, Promise<string | null>>();
-  const resolved = new Map<string, string | null>();
+  const resolved = new Map<string, string>();
 
   return {
-    /** Icône déjà connue (`undefined` si pas encore demandée ou en cours). */
-    peek(tile: Tile): string | null | undefined {
+    /** Icône déjà trouvée (`undefined` sinon : pas encore demandée, en cours ou introuvable). */
+    peek(tile: Tile): string | undefined {
       return resolved.get(iconKey(tile));
     },
     /** Demande l'icône (une seule requête par clé, même en parallèle). */
@@ -35,7 +35,14 @@ export function createIconCache(fetch: Fetch) {
           // Une erreur inattendue ne doit rien casser : monogramme.
           .catch(() => null)
           .then((src) => {
-            resolved.set(key, src);
+            if (src) {
+              resolved.set(key, src);
+            } else {
+              // Pas d'icône : on n'en garde pas souvenir, pour redemander à la
+              // prochaine apparition de la tuile (fichier revenu, réseau
+              // rétabli…). Rust répond vite : il sait déjà quoi réessayer.
+              pending.delete(key);
+            }
             return src;
           });
         pending.set(key, promise);

@@ -24,11 +24,14 @@ describe("createIconCache", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("une erreur donne null (monogramme)", async () => {
-    const cache = createIconCache(async () => {
+  it("une erreur donne null (monogramme) et sera redemandée", async () => {
+    const fetch = vi.fn(async () => {
       throw new Error("boom");
     });
+    const cache = createIconCache(fetch);
     expect(await cache.load(tile)).toBeNull();
-    expect(cache.peek(tile)).toBeNull();
+    expect(cache.peek(tile)).toBeUndefined();
+    await cache.load(tile);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });

@@ -60,7 +60,9 @@ windows = { version = "0.62", features = [
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# `unwind` (et non `abort`) : si une crate panique (une image piégée
+# téléchargée sur un site…), seule la tâche concernée s'arrête ; l'app continue.
+panic = "unwind"
 strip = true
 
 [dev-dependencies]

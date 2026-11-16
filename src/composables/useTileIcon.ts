@@ -18,7 +18,7 @@ export function useTileIcon(tile: () => Tile): Ref<string | null> {
       // Déjà connue : affichage immédiat, sans attendre de promesse.
       const known = cache.peek(t);
       src.value = known ?? null;
-      if (known !== undefined) return;
+      if (known) return;
       const key = iconKey(t);
       void cache.load(t).then((loaded) => {
         // La tuile a pu changer entre-temps : on n'écrase pas sa nouvelle icône.

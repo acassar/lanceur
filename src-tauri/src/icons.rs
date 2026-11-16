@@ -42,7 +42,7 @@ use image::{DynamicImage, ImageFormat, imageops::FilterType};
 
 use crate::config::{Target, Tile};
 use crate::fsutil;
-use crate::launch::expand_env;
+use crate::launch::{check_web_url, expand_env};
 
 /// Sous-dossier du cache, à côté de `config.json`.
 pub const DIR_NAME: &str = "icons";
@@ -95,6 +95,26 @@ impl Source {
     }
 }
 
+/// Pourquoi une icône n'a pas été trouvée.
+#[derive(Debug)]
+pub struct Failure {
+    pub message: String,
+    /// `true` si le serveur n'a pas pu être joint (pas de réseau, délai
+    /// dépassé). Cet échec est sans doute passager : on ne le mémorise pas.
+    pub offline: bool,
+}
+
+/// Permet d'utiliser `?` sur un `Result<_, String>` dans une fonction qui
+/// renvoie `Result<_, Failure>` : Rust convertit l'erreur avec ce `From`.
+impl From<String> for Failure {
+    fn from(message: String) -> Self {
+        Failure {
+            message,
+            offline: false,
+        }
+    }
+}
+
 /// Une image prête à être mise en cache et affichée.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Encoded {
@@ -135,7 +155,7 @@ impl Format {
 /// le thread. Chaque `.await` est un point où Rust peut faire autre chose en
 /// attendant, comme `await` en TypeScript.
 pub async fn icon_data_url(config_dir: PathBuf, tile: Tile) -> Option<String> {
-    let source = source_for(&tile, |name| std::env::var(name).ok())?;
+    let source = source_for(&tile, &config_dir, |name| std::env::var(name).ok())?;
     let cache_dir = config_dir.join(DIR_NAME);
 
     // 1. Déjà en cache ? (lecture de fichiers : sur un thread d'attente)
@@ -152,17 +172,23 @@ pub async fn icon_data_url(config_dir: PathBuf, tile: Tile) -> Option<String> {
 
     // 2. Sinon, on la produit.
     let produced = produce(&source).await;
-    if let Err(reason) = &produced {
-        eprintln!("icône de « {} » introuvable : {reason}", tile.id);
-    }
+    // On ne mémorise un échec que s'il vient d'Internet *et* que le serveur a
+    // répondu (page sans icône, image illisible…). Sans réseau (PC qui démarre
+    // avant le Wi-Fi), on réessaiera à la prochaine ouverture.
+    let remember_failure = match &produced {
+        Ok(_) => false,
+        Err(failure) => {
+            eprintln!("icône de « {} » introuvable : {}", tile.id, failure.message);
+            source.is_remote() && !failure.offline
+        }
+    };
     let encoded = produced.ok();
 
     // 3. Et on la range dans le cache (ou on note l'échec).
     let id = tile.id.clone();
     let to_store = encoded.clone();
-    let remote = source.is_remote();
     blocking(move || {
-        if let Err(e) = cache_store(&cache_dir, &id, &key, to_store.as_ref(), remote) {
+        if let Err(e) = cache_store(&cache_dir, &id, &key, to_store.as_ref(), remember_failure) {
             eprintln!("cache d'icône non écrit : {e}");
         }
     })
@@ -184,8 +210,29 @@ where
     tauri::async_runtime::spawn_blocking(f).await.ok()
 }
 
+/// Comme [`blocking`], pour un travail qui peut échouer. Sert aussi au
+/// décodage et au redimensionnement des images : ce sont des calculs lourds,
+/// qui ne doivent pas occuper les threads `async` (ceux qui répondent aux
+/// autres commandes, comme `launch`).
+async fn on_blocking<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    blocking(f)
+        .await
+        .unwrap_or_else(|| Err("erreur interne".into()))
+}
+
 /// Choisit la source de l'image d'une tuile (fonction pure, testée plus bas).
-pub fn source_for(tile: &Tile, env: impl Fn(&str) -> Option<String>) -> Option<Source> {
+///
+/// `config_dir` : un chemin `"icon"` relatif (`images\\amazon.png`) se lit
+/// par rapport au dossier de `config.json`.
+pub fn source_for(
+    tile: &Tile,
+    config_dir: &Path,
+    env: impl Fn(&str) -> Option<String>,
+) -> Option<Source> {
     // `"icon"` remplace toujours la source automatique.
     if let Some(icon) = tile
         .icon
@@ -194,9 +241,15 @@ pub fn source_for(tile: &Tile, env: impl Fn(&str) -> Option<String>) -> Option<S
         .filter(|s| !s.is_empty())
     {
         if is_http_url(icon) {
-            return Some(Source::ImageUrl(icon.to_string()));
+            return check_web_url(icon)
+                .ok()
+                .map(|()| Source::ImageUrl(icon.to_string()));
         }
-        let path = PathBuf::from(expand_env(icon, &env));
+        let expanded = expand_env(icon, &env);
+        let path = match is_absolute_windows_path(&expanded) {
+            true => PathBuf::from(expanded),
+            false => config_dir.join(expanded),
+        };
         // Un exe ou un raccourci donné comme icône : on prend son icône Windows.
         let is_shell = path.extension().is_some_and(|e| {
             ["exe", "lnk", "dll", "url"]
@@ -216,13 +269,27 @@ pub fn source_for(tile: &Tile, env: impl Fn(&str) -> Option<String>) -> Option<S
             Some(Source::Shell(resolve_in_path(path, &env)))
         }
         // Une URL invalide ne se lance pas non plus : pas d'icône à chercher.
-        Target::Web { url } => is_http_url(url).then(|| Source::Favicon(url.clone())),
+        // (même vérification qu'au lancement, dans launch.rs).
+        Target::Web { url } => check_web_url(url)
+            .ok()
+            .map(|()| Source::Favicon(url.clone())),
     }
 }
 
+/// `true` pour un texte qui commence par `http://` ou `https://`.
 fn is_http_url(s: &str) -> bool {
     let lower = s.to_ascii_lowercase();
     lower.starts_with("https://") || lower.starts_with("http://")
+}
+
+/// `C:\…`, `\\serveur\…` ou `\…` : chemin absolu au sens de Windows. On teste
+/// le texte plutôt que `Path::is_absolute`, pour que les tests donnent le même
+/// résultat sous Linux (où `C:\…` n'est pas un chemin absolu).
+fn is_absolute_windows_path(s: &str) -> bool {
+    let b = s.as_bytes();
+    let drive =
+        b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/');
+    drive || s.starts_with(['\\', '/'])
 }
 
 /// Un nom seul (`wt.exe`) est cherché dans les dossiers du `PATH`, comme le
@@ -311,13 +378,14 @@ fn cache_store(
     id: &str,
     key: &str,
     encoded: Option<&Encoded>,
-    remote: bool,
+    remember_failure: bool,
 ) -> Result<(), crate::error::AppError> {
     let file_name = match encoded {
         Some(e) => format!("{key}.{}", e.format.ext()),
-        // Échec en local (fichier absent…) : rien à mémoriser, c'est rapide à
-        // revérifier, et l'icône apparaîtra dès que le fichier existera.
-        None if !remote => {
+        // Échec à ne pas mémoriser : en local (fichier absent…), c'est rapide à
+        // revérifier, et l'icône apparaîtra dès que le fichier existera ; sans
+        // réseau, on réessaiera à la prochaine ouverture.
+        None if !remember_failure => {
             remove_stale(cache_dir, id, None);
             return Ok(());
         }
@@ -366,26 +434,31 @@ fn to_data_url(encoded: &Encoded) -> String {
 // Production de l'image selon la source
 // ---------------------------------------------------------------------------
 
-async fn produce(source: &Source) -> Result<Encoded, String> {
+async fn produce(source: &Source) -> Result<Encoded, Failure> {
+    // Les lectures de fichiers, appels Windows, décodages et redimensionnements
+    // passent par `on_blocking` ; seuls les téléchargements restent `async`.
     match source {
         Source::ImageFile(path) => {
             let path = path.clone();
-            blocking(move || {
+            Ok(on_blocking(move || {
                 let bytes = fs::read(&path).map_err(|e| format!("{} : {e}", path.display()))?;
                 encode_icon(decode(&bytes)?)
             })
-            .await
-            .unwrap_or_else(|| Err("erreur interne".into()))
+            .await?)
         }
-        Source::ImageUrl(url) => encode_icon(decode(&favicon::download(url).await?)?),
+        Source::ImageUrl(url) => {
+            let bytes = favicon::download(url).await?;
+            Ok(on_blocking(move || encode_icon(decode(&bytes)?)).await?)
+        }
         Source::Shell(path) => {
             let path = path.clone();
-            blocking(move || encode_icon(shell_icon(&path)?))
-                .await
-                .unwrap_or_else(|| Err("erreur interne".into()))
+            Ok(on_blocking(move || encode_icon(shell_icon(&path)?)).await?)
         }
         Source::SteamCover(app_id) => steam_cover(*app_id).await,
-        Source::Favicon(url) => encode_icon(favicon::fetch(url).await?),
+        Source::Favicon(url) => {
+            let image = favicon::fetch(url).await?;
+            Ok(on_blocking(move || encode_icon(image)).await?)
+        }
     }
 }
 
@@ -503,27 +576,42 @@ pub fn bgra_to_rgba(pixels: &mut [u8]) {
 
 /// Jaquette d'un jeu : d'abord le cache de Steam sur le disque (pas de réseau),
 /// sinon le CDN de Steam (la même image que dans la bibliothèque Steam).
-async fn steam_cover(app_id: u32) -> Result<Encoded, String> {
-    let local = blocking(move || {
-        let steam = steam_dir()?;
-        let path = find_local_cover(&steam, app_id)?;
-        let bytes = fs::read(path).ok()?;
-        decode(&bytes).ok()
+async fn steam_cover(app_id: u32) -> Result<Encoded, Failure> {
+    let local = on_blocking(move || {
+        let path = steam_dir()
+            .and_then(|steam| find_local_cover(&steam, app_id))
+            .ok_or_else(|| "pas de jaquette dans le cache de Steam".to_string())?;
+        let bytes = fs::read(path).map_err(|e| e.to_string())?;
+        encode_cover(decode(&bytes)?)
     })
-    .await
-    .flatten();
-    if let Some(image) = local {
-        return encode_cover(image);
+    .await;
+    if let Ok(cover) = local {
+        return Ok(cover);
     }
 
-    let mut last_error = String::new();
+    // `offline` reste `true` tant que *tous* les serveurs étaient injoignables.
+    let mut failure = Failure {
+        message: "aucune jaquette".into(),
+        offline: true,
+    };
     for url in steam_cover_urls(app_id) {
-        match favicon::download(&url).await.and_then(|b| decode(&b)) {
-            Ok(image) => return encode_cover(image),
-            Err(e) => last_error = e,
+        let result = match favicon::download(&url).await {
+            Ok(bytes) => on_blocking(move || encode_cover(decode(&bytes)?))
+                .await
+                .map_err(Failure::from),
+            Err(e) => Err(e),
+        };
+        match result {
+            Ok(cover) => return Ok(cover),
+            Err(e) => {
+                failure = Failure {
+                    message: format!("{url} : {}", e.message),
+                    offline: failure.offline && e.offline,
+                }
+            }
         }
     }
-    Err(last_error)
+    Err(failure)
 }
 
 /// URL des jaquettes sur les serveurs de Steam, de la plus adaptée à la moins
@@ -583,21 +671,26 @@ fn steam_dir() -> Option<PathBuf> {
 /// `OnceLock` : la valeur est créée au premier appel de `get_or_init`, puis
 /// réutilisée (comme un singleton). Garder un seul client réutilise les
 /// connexions déjà ouvertes vers un même serveur.
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            // Certains sites refusent les clients qui ne ressemblent pas à un
-            // navigateur : on se présente comme Edge (le navigateur des tuiles).
-            .user_agent(concat!(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ",
-                "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
-            ))
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(10))
-            .build()
-            .unwrap_or_default()
-    })
+///
+/// `Option` : si le client ne peut pas être créé (TLS indisponible…), on n'a
+/// simplement pas d'icônes Internet, au lieu d'arrêter l'app.
+fn http_client() -> Option<&'static reqwest::Client> {
+    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                // Certains sites refusent les clients qui ne ressemblent pas à un
+                // navigateur : on se présente comme Edge (le navigateur des tuiles).
+                .user_agent(concat!(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ",
+                    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
+                ))
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(10))
+                .build()
+                .ok()
+        })
+        .as_ref()
 }
 
 #[cfg(test)]
@@ -609,6 +702,10 @@ mod tests {
             "APPDATA" => Some(r"C:\Users\A\AppData\Roaming".into()),
             _ => None,
         }
+    }
+
+    fn source_for_test(tile: &Tile, env: impl Fn(&str) -> Option<String>) -> Option<Source> {
+        source_for(tile, Path::new("/config"), env)
     }
 
     fn tile(icon: Option<&str>, target: Target) -> Tile {
@@ -631,11 +728,11 @@ mod tests {
     #[test]
     fn source_selon_le_type_de_tuile() {
         assert_eq!(
-            source_for(&tile(None, Target::Steam { app_id: 730 }), env),
+            source_for_test(&tile(None, Target::Steam { app_id: 730 }), env),
             Some(Source::SteamCover(730))
         );
         assert_eq!(
-            source_for(&tile(None, app(r"%APPDATA%\x.lnk")), env),
+            source_for_test(&tile(None, app(r"%APPDATA%\x.lnk")), env),
             Some(Source::Shell(PathBuf::from(
                 r"C:\Users\A\AppData\Roaming\x.lnk"
             )))
@@ -644,35 +741,42 @@ mod tests {
             url: "https://a.fr".into(),
         };
         assert_eq!(
-            source_for(&tile(None, web), env),
+            source_for_test(&tile(None, web), env),
             Some(Source::Favicon("https://a.fr".into()))
         );
         let bad = Target::Web {
             url: "file:///c".into(),
         };
-        assert_eq!(source_for(&tile(None, bad), env), None);
+        assert_eq!(source_for_test(&tile(None, bad), env), None);
     }
 
     #[test]
     fn le_champ_icon_remplace_la_source_automatique() {
         let steam = || Target::Steam { app_id: 1 };
         assert_eq!(
-            source_for(&tile(Some(r"%APPDATA%\i.png"), steam()), env),
+            source_for_test(&tile(Some(r"%APPDATA%\i.png"), steam()), env),
             Some(Source::ImageFile(PathBuf::from(
                 r"C:\Users\A\AppData\Roaming\i.png"
             )))
         );
         assert_eq!(
-            source_for(&tile(Some("https://x/i.png"), steam()), env),
+            source_for_test(&tile(Some("https://x/i.png"), steam()), env),
             Some(Source::ImageUrl("https://x/i.png".into()))
         );
         assert_eq!(
-            source_for(&tile(Some(r"C:\a\Jeu.EXE"), steam()), env),
+            source_for_test(&tile(Some(r"C:\a\Jeu.EXE"), steam()), env),
             Some(Source::Shell(PathBuf::from(r"C:\a\Jeu.EXE")))
+        );
+        // Chemin relatif : par rapport au dossier de config.json.
+        assert_eq!(
+            source_for_test(&tile(Some(r"images\a.png"), steam()), env),
+            Some(Source::ImageFile(
+                Path::new("/config").join(r"images\a.png")
+            ))
         );
         // Un `"icon": ""` est ignoré.
         assert_eq!(
-            source_for(&tile(Some("  "), steam()), env),
+            source_for_test(&tile(Some("  "), steam()), env),
             Some(Source::SteamCover(1))
         );
     }
