@@ -211,64 +211,14 @@ Les tests automatiques tournent dans la CI :
 
 ## 6. Compilation (GitHub Actions)
 
-Pas de toolchain Rust nécessaire sur votre PC : chaque push compile l'app sur un runner Windows.
+Pas de toolchain Rust nécessaire sur votre PC : chaque push sur `main` et chaque PR compilent l'app sur un runner Windows (et *Run workflow* permet de lancer un build sur n'importe quelle branche).
 
-`.github/workflows/build.yml` :
-
-```yaml
-name: build
-
-on:
-  push:
-    branches: [main]
-    tags: ['v*']
-  pull_request:
-  workflow_dispatch:
-
-jobs:
-  windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write          # nécessaire pour créer la Release sur un tag
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
-
-      - run: npm ci
-      - run: npm test --if-present
-      - run: npm run build                     # le dossier dist/ doit exister avant cargo
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
-
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # Sur un tag v* : crée une Release brouillon avec les installeurs.
-          # Sinon : build simple, sans Release.
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-          releaseName: 'Lanceur ${{ github.ref_name }}'
-          releaseDraft: true
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: lanceur-windows
-          path: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*.exe
-```
+Le workflow est dans [`.github/workflows/build.yml`](.github/workflows/build.yml), commenté. En résumé :
+- **job `build`** (push sur `main`, PR, lancement manuel) : `npm ci`, build du front et de l'app avec `tauri-action`, `cargo test`, puis envoi des installeurs en artefact. Le jeton GitHub y est en lecture seule ;
+- **job `release`** (tag `v*`) : vérifie que le tag correspond aux versions de `package.json` et `Cargo.toml`, puis crée une Release brouillon. C'est le seul job autorisé à écrire dans le repo.
 
 **Récupérer l'app**
-- À chaque push : ouvrez l'onglet *Actions*, puis le dernier run et l'artefact `lanceur-windows` (zip contenant le `.msi` et le `-setup.exe`).
+- À chaque build : ouvrez l'onglet *Actions*, puis le dernier run et l'artefact `lanceur-windows` (zip contenant le `.msi` et le `-setup.exe`).
 - Pour une version : `git tag v0.1.0 && git push --tags`, puis publiez la Release brouillon créée.
 
 **À savoir** : l'installeur n'est pas signé, donc Windows SmartScreen affichera « Windows a protégé votre ordinateur ». Cliquez sur *Informations complémentaires*, puis *Exécuter quand même*. C'est normal pour un projet perso. La signature est payante et peut venir plus tard.

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissions accordées à la fenêtre principale. Le front n'a accès qu'au strict minimum : tout ce qui touche au système passe par nos commandes Rust.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}
