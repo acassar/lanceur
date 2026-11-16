@@ -72,6 +72,7 @@ lanceur/
 │     ├─ launch.rs               # steam / exe / lnk / web
 │     ├─ icons.rs                # extraction d'icône exe, favicon, cache
 │     ├─ window.rs               # afficher/masquer, centrer, raccourci global
+│     ├─ watch.rs                # surveille config.json (rechargement automatique)
 │     └─ error.rs                # type d'erreur unique, sérialisable vers le front
 ├─ index.html
 ├─ package.json
@@ -151,6 +152,7 @@ Règles :
 - Les variables d'environnement (`%APPDATA%`, `%LOCALAPPDATA%`…) sont développées au lancement.
 - Un `config.schema.json` (JSON Schema) est fourni à la racine du repo. VS Code proposera alors l'autocomplétion et signalera les erreurs pendant l'édition à la main.
 - Au premier démarrage, si le fichier n'existe pas, l'app crée une config d'exemple.
+- L'app surveille le fichier : dès qu'il est enregistré, les tuiles et les réglages (raccourci compris) sont rechargés, sans redémarrer.
 - Si le JSON est invalide, l'app affiche l'erreur (ligne et colonne) dans la fenêtre au lieu de planter, et garde la dernière config valide.
 
 Côté Rust, le champ `type` se traduit très naturellement par une *enum* :

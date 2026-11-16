@@ -411,6 +411,37 @@ fn remove_stale(cache_dir: &Path, id: &str, keep: Option<&str>) {
     }
 }
 
+/// Supprime du cache les icônes des tuiles qui n'existent plus dans la config.
+///
+/// Appelée après chaque lecture réussie de `config.json` (commande
+/// `get_config`). Seuls les fichiers au format du cache
+/// (`<id>-<16 hex>.png|jpg|none`) sont concernés : un autre fichier posé dans
+/// `icons\` n'est jamais touché.
+pub fn remove_orphans(config_dir: &Path, tiles: &[Tile]) {
+    let Ok(entries) = fs::read_dir(config_dir.join(DIR_NAME)) else {
+        return; // pas encore de cache : rien à faire
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        // `let … else` : si le nom n'a pas la forme d'un fichier de cache, on passe.
+        let Some(id) = cache_file_id(name) else {
+            continue;
+        };
+        if !tiles.iter().any(|t| t.id == id) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// L'id de la tuile d'un fichier de cache (`cs2-0123456789abcdef.png` → `cs2`),
+/// ou `None` si `name` n'est pas un fichier de cache.
+fn cache_file_id(name: &str) -> Option<&str> {
+    // `rsplit_once` coupe au *dernier* `-` : un id peut lui-même contenir des `-`.
+    let (id, _) = name.rsplit_once('-')?;
+    is_cache_file_of(name, id).then_some(id)
+}
+
 /// `true` si `name` est exactement `<id>-<16 hex>.(png|jpg|none)`. On vérifie
 /// la forme complète : l'id `cs` ne doit pas toucher aux fichiers de `cs-2`.
 fn is_cache_file_of(name: &str, id: &str) -> bool {
@@ -820,6 +851,32 @@ mod tests {
         assert!(!is_cache_file_of("cs-2-0123456789abcdef.png", "cs"));
         assert!(!is_cache_file_of("cs-0123456789abcdef.txt", "cs"));
         assert!(!is_cache_file_of("cs-0123.png", "cs"));
+    }
+
+    #[test]
+    fn supprime_les_icones_des_tuiles_retirees() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join(DIR_NAME);
+        fs::create_dir_all(&cache).unwrap();
+        let files = [
+            "t-0123456789abcdef.png",
+            "t-2-0123456789abcdef.jpg",
+            "old-0123456789abcdef.none",
+            "notes.txt",
+        ];
+        for f in files {
+            fs::write(cache.join(f), b"x").unwrap();
+        }
+        // Seule la tuile `t` existe encore (pas `t-2` ni `old`).
+        let tiles = [tile(None, Target::Steam { app_id: 1 })];
+        remove_orphans(dir.path(), &tiles);
+
+        let mut left: Vec<String> = fs::read_dir(&cache)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["notes.txt", "t-0123456789abcdef.png"]);
     }
 
     fn png_bytes(w: u32, h: u32) -> Vec<u8> {

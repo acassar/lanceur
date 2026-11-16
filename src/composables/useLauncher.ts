@@ -36,13 +36,21 @@ export function useLauncher() {
    * Charge (ou recharge) la config. En cas d'erreur, la dernière config valide
    * reste affichée s'il y en a une ; l'erreur s'affiche à côté.
    */
+  let loadRequest = 0;
   async function load() {
+    // Plusieurs rechargements peuvent se croiser (fenêtre réaffichée pendant
+    // que config.json est enregistré) : seule la réponse du dernier est appliquée,
+    // pour ne jamais remplacer une config récente par une plus ancienne.
+    const request = ++loadRequest;
     try {
-      config.value = await ipc.getConfig();
-      recents.value = await ipc.getRecents();
+      const cfg = await ipc.getConfig();
+      const rec = await ipc.getRecents();
+      if (request !== loadRequest) return;
+      config.value = cfg;
+      recents.value = rec;
       error.value = null;
     } catch (e) {
-      error.value = toIpcError(e);
+      if (request === loadRequest) error.value = toIpcError(e);
     }
   }
 

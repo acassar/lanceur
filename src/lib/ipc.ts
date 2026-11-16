@@ -29,12 +29,20 @@ export interface Ipc {
    * exe relancé). Renvoie une fonction qui arrête l'écoute.
    */
   onWindowShown(callback: () => void): Promise<() => void>;
+  /**
+   * Appelle `callback` chaque fois que config.json est enregistré sur le disque
+   * (surveillé par Rust, voir watch.rs). Renvoie une fonction qui arrête l'écoute.
+   */
+  onConfigChanged(callback: () => void): Promise<() => void>;
   /** Ouvre le dossier de config.json dans l'Explorateur. */
   openConfigFolder(): Promise<void>;
 }
 
 /** Événement émis par Rust quand la fenêtre réapparaît (`SHOWN_EVENT` dans window.rs). */
 export const WINDOW_SHOWN_EVENT = "window-shown";
+
+/** Événement émis par Rust quand config.json change (`CONFIG_CHANGED_EVENT` dans watch.rs). */
+export const CONFIG_CHANGED_EVENT = "config-changed";
 
 /** Miroir de `HotkeyStatus` dans window.rs. */
 export interface HotkeyStatus {
@@ -73,6 +81,7 @@ function createTauriIpc(): Ipc {
     hideWindow: () => invoke("hide_window"),
     getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
     onWindowShown: (callback) => listen(WINDOW_SHOWN_EVENT, () => callback()),
+    onConfigChanged: (callback) => listen(CONFIG_CHANGED_EVENT, () => callback()),
     openConfigFolder: () => invoke("open_config_folder"),
   };
 }

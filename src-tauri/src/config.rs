@@ -13,6 +13,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -184,6 +186,77 @@ pub fn load_or_create(dir: &Path) -> Result<Config, AppError> {
     // `parse` ne fait qu'emprunter `text` (`&text`) et `path` (`&path`) :
     // on pourrait encore s'en servir après cet appel.
     parse(&text, &path)
+}
+
+/// Dernière config lue avec succès, et l'état du fichier à ce moment-là.
+struct Cached {
+    path: PathBuf,
+    /// Date de modification et taille de `config.json` lors de la lecture.
+    stamp: (SystemTime, u64),
+    config: Config,
+}
+
+/// Mémoire partagée par tout le programme pour [`load_cached`].
+///
+/// `static` : une seule valeur pour toute l'app, comme une variable de module
+/// en TypeScript. Rust interdit de modifier un `static` sans protection (deux
+/// threads pourraient l'écrire en même temps) : d'où le `Mutex`.
+/// `Mutex::new(None)` peut être évalué à la compilation, ce qui est exigé pour
+/// un `static`.
+static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
+
+/// Comme [`load_or_create`], mais sans relire ni revalider le fichier s'il n'a
+/// pas changé depuis la dernière lecture (même date de modification, même taille).
+///
+/// Utile pour `get_icon`, appelée une fois *par tuile* à l'ouverture : avec
+/// 40 tuiles, on lisait et validait 40 fois le même fichier. Maintenant, on ne
+/// demande à Windows que sa date et sa taille, ce qui est quasi instantané.
+///
+/// La valeur renvoyée est une *copie* (`clone`) : l'appelant en est
+/// propriétaire et peut la garder sans tenir le verrou.
+pub fn load_cached(dir: &Path) -> Result<Config, AppError> {
+    let path = dir.join(FILE_NAME);
+    let stamp = file_stamp(&path);
+    {
+        // Bloc `{ … }` : le verrou est relâché à sa fin, avant la lecture du
+        // fichier (on ne bloque pas les autres threads pendant ce temps).
+        let cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        // `if let Some(c) = …` + condition : on ne sert la copie que si elle
+        // concerne le même fichier, dans le même état.
+        if let Some(c) = cache
+            .as_ref()
+            .filter(|c| c.path == path && Some(c.stamp) == stamp)
+        {
+            return Ok(c.config.clone());
+        }
+    }
+    load_and_remember(dir)
+}
+
+/// Lit `config.json` sans tenir compte de la mémoire, puis la met à jour.
+/// C'est ce que fait `get_config` : un rechargement demandé lit toujours le disque.
+pub fn load_and_remember(dir: &Path) -> Result<Config, AppError> {
+    let path = dir.join(FILE_NAME);
+    // L'état du fichier est relevé *avant* la lecture : s'il est modifié
+    // pendant qu'on le lit, la date ne correspondra plus au prochain appel, qui
+    // relira donc le fichier. Dans l'autre ordre, on risquerait de garder
+    // l'ancienne version en croyant avoir la nouvelle.
+    let stamp = file_stamp(&path);
+    let config = load_or_create(dir)?;
+    let mut cache = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    *cache = stamp.map(|stamp| Cached {
+        path,
+        stamp,
+        config: config.clone(),
+    });
+    Ok(config)
+}
+
+/// Date de modification et taille du fichier, ou `None` s'il est illisible
+/// (absent au premier démarrage…) : dans ce cas, rien n'est mémorisé.
+fn file_stamp(path: &Path) -> Option<(SystemTime, u64)> {
+    let meta = fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
 }
 
 /// Lit le fichier en texte, en convertissant l'erreur éventuelle.
@@ -565,7 +638,13 @@ mod tests {
         assert_eq!(json["settings"]["hideAfterLaunch"], true);
         assert_eq!(json["tiles"][0]["type"], "steam");
         assert_eq!(json["tiles"][0]["appId"], 730);
-        assert!(json.get("$schema").is_none());
+        // `$schema` est transmis tel quel ; le front l'ignore.
+        assert!(
+            json["$schema"]
+                .as_str()
+                .unwrap()
+                .ends_with("config.schema.json")
+        );
     }
 
     #[test]
@@ -639,6 +718,74 @@ mod tests {
         fs::write(&path, r#"{ "version": 1 }"#).unwrap();
         let config = load_or_create(&dir).unwrap();
         assert!(config.tiles.is_empty());
+    }
+
+    #[test]
+    fn la_memoire_suit_les_modifications_du_fichier() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let path = dir.join(FILE_NAME);
+        fs::write(&path, r#"{ "version": 1 }"#).unwrap();
+        assert!(load_cached(dir).unwrap().favorites.is_empty());
+
+        // Fichier modifié (taille différente) : il est relu.
+        fs::write(
+            &path,
+            r#"{ "version": 1, "categories": [{ "id": "c", "name": "C" }] }"#,
+        )
+        .unwrap();
+        assert_eq!(load_cached(dir).unwrap().categories.len(), 1);
+
+        // Fichier devenu invalide : l'erreur est renvoyée, pas l'ancienne copie.
+        fs::write(&path, "{").unwrap();
+        assert!(load_cached(dir).is_err());
+    }
+
+    /// `config.schema.json` (à la racine du repo) doit décrire les mêmes champs
+    /// que les structs : ce test échoue si on ajoute un réglage sans le schéma.
+    #[test]
+    fn le_schema_json_suit_les_structs() {
+        use std::collections::BTreeSet;
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../config.schema.json")).unwrap();
+        // Noms des propriétés d'un objet du schéma, triés.
+        let keys = |v: &serde_json::Value| -> BTreeSet<String> {
+            v["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect()
+        };
+
+        let settings = serde_json::to_value(Settings::default()).unwrap();
+        let expected: BTreeSet<String> = settings.as_object().unwrap().keys().cloned().collect();
+        assert_eq!(keys(&schema["properties"]["settings"]), expected);
+
+        let mut expected: BTreeSet<String> = ["id", "name", "category", "icon", "type"]
+            .map(String::from)
+            .into();
+        for kind in ["steam", "app", "web"] {
+            expected.extend(allowed_tile_fields(kind).iter().map(|f| f.to_string()));
+        }
+        assert_eq!(keys(&schema["definitions"]["tile"]), expected);
+
+        let top: BTreeSet<String> = [
+            "$schema",
+            "version",
+            "settings",
+            "categories",
+            "favorites",
+            "tiles",
+        ]
+        .map(String::from)
+        .into();
+        assert_eq!(keys(&schema), top);
+        // La config d'exemple pointe vers le schéma.
+        assert_eq!(
+            parse(EXAMPLE, &p()).unwrap().schema.as_deref(),
+            schema["$id"].as_str()
+        );
     }
 
     #[test]

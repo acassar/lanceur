@@ -109,5 +109,8 @@ export function createMockIpc(
     async onWindowShown() {
       return () => {};
     },
+    async onConfigChanged() {
+      return () => {};
+    },
   };
 }

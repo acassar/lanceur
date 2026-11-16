@@ -12,6 +12,7 @@ mod fsutil;
 mod icons;
 mod launch;
 mod state;
+mod watch;
 mod window;
 
 use config::Config;
@@ -32,7 +33,17 @@ async fn get_config(app: tauri::AppHandle) -> Result<Config, AppError> {
     // `?` : si `config_dir` renvoie une erreur, `get_config` s'arrête et la
     // renvoie telle quelle. Sinon, `dir` reçoit le chemin.
     let dir = config::config_dir(&app)?;
-    let config = config::load_or_create(&dir)?;
+    // Lecture du disque à chaque fois (pas de copie en mémoire) : c'est la
+    // commande de rechargement. Elle met aussi à jour la copie mémorisée dont
+    // se servent `get_icon` et `get_recents` (voir `config::load_cached`).
+    let config = config::load_and_remember(&dir)?;
+    // Ménage du cache d'icônes : celles des tuiles retirées de la config sont
+    // supprimées. En arrière-plan et sans attendre (`spawn_blocking` sans
+    // `.await`) : la config part tout de suite vers le front. La closure reçoit
+    // sa propre copie des tuiles (`clone`), car `config` est renvoyée plus bas.
+    let tiles = config.tiles.clone();
+    let icons_dir = dir.clone();
+    tauri::async_runtime::spawn_blocking(move || icons::remove_orphans(&icons_dir, &tiles));
     // Le raccourci et `hideOnBlur` suivent la config qu'on vient de lire.
     // Si le fichier est invalide, on n'arrive pas ici (`?` au-dessus) : les
     // derniers réglages valides restent en place.
@@ -46,7 +57,7 @@ async fn get_config(app: tauri::AppHandle) -> Result<Config, AppError> {
 #[tauri::command]
 async fn get_recents(app: tauri::AppHandle) -> Result<Vec<String>, AppError> {
     let dir = config::config_dir(&app)?;
-    let config = config::load_or_create(&dir)?;
+    let config = config::load_cached(&dir)?;
     Ok(state::visible_recents(&state::load(&dir), &config))
 }
 
@@ -129,7 +140,9 @@ async fn get_icon(app: tauri::AppHandle, id: String) -> Option<String> {
     // `.ok()?` : en cas d'erreur (config invalide…), on renvoie `None`. Le
     // message d'erreur de la config est déjà affiché par `get_config`.
     let dir = config::config_dir(&app).ok()?;
-    let config = config::load_or_create(&dir).ok()?;
+    // `load_cached` : le fichier n'est relu que s'il a changé depuis la dernière
+    // lecture. À l'ouverture, `get_icon` est appelée une fois par tuile.
+    let config = config::load_cached(&dir).ok()?;
     // `into_iter()` consomme la liste : on récupère la tuile elle-même (pas
     // une référence), qu'on peut donner à la tâche async.
     let tile = config.tiles.into_iter().find(|t| t.id == id)?;
@@ -210,17 +223,26 @@ pub fn run() {
         // `manage` confie une valeur à Tauri ; on la retrouve ensuite avec
         // `app.state::<WindowState>()` ou un paramètre `State<…>` de commande.
         .manage(window::WindowState::default())
+        .manage(watch::ConfigWatcher::default())
         // `setup` s'exécute une fois, au démarrage, avant l'affichage.
         .setup(|app| {
             let handle = app.handle();
             // Réglages de la fenêtre lus dans config.json. Si le fichier est
             // invalide, on prend les réglages par défaut : le raccourci marche
             // quand même, et le front affiche l'erreur de config.
-            let settings = config::config_dir(handle)
-                .and_then(|dir| config::load_or_create(&dir))
+            // `.ok()` : `Result` -> `Option` (l'erreur ne sert pas ici).
+            let dir = config::config_dir(handle).ok();
+            let settings = dir
+                .as_deref()
+                .and_then(|d| config::load_or_create(d).ok())
                 .map(|c| c.settings)
                 .unwrap_or_default();
             window::sync_settings(handle, &settings);
+            // Rechargement automatique quand config.json est enregistré (watch.rs).
+            // Le dossier existe : `load_or_create` vient de le créer au besoin.
+            if let Some(dir) = &dir {
+                watch::start(handle, dir);
+            }
             if let Some(main) = handle.get_webview_window("main") {
                 window::center_on_active_monitor(handle, &main);
             }
