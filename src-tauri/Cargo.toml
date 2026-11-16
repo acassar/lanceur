@@ -24,6 +24,19 @@ serde_json = "1"
 thiserror = "2"
 serde_path_to_error = "0.1"
 
+# Dépendances compilées uniquement pour Windows : l'API Win32 (ShellExecuteExW
+# pour ouvrir les .lnk et les URL steam://). Chaque « feature » active une
+# partie de l'API, pour ne compiler que ce qu'on utilise.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  # requis par la struct SHELLEXECUTEINFOW (champ hkeyClass)
+  "Win32_System_Registry",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

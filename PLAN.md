@@ -85,9 +85,8 @@ lanceur/
 |---|---|
 | `tauri-plugin-global-shortcut` | raccourci clavier global pour afficher ou masquer la fenêtre |
 | `tauri-plugin-single-instance` | relancer l'app réaffiche la fenêtre existante au lieu d'en ouvrir une 2ᵉ |
-| `tauri-plugin-opener` | ouvrir `steam://…` et les URL avec le gestionnaire Windows |
 
-Crates Rust en plus : `serde` et `serde_json` (JSON), `thiserror` (erreurs), `windows` (API Win32 pour les icônes), `reqwest` (favicons), `image` (encodage PNG).
+Crates Rust en plus : `serde` et `serde_json` (JSON), `thiserror` (erreurs), `windows` (API Win32 pour les lancements et les icônes), `reqwest` (favicons), `image` (encodage PNG).
 
 ## 3. Fichiers de données
 
@@ -185,10 +184,10 @@ enum Target {
 Événement émis par Rust vers le front : `window-shown`. Le front y vide la recherche et redonne le focus au champ.
 
 **Lancement selon le type**
-- `steam` : ouverture de `steam://rungameid/<appId>` via le plugin opener.
+- `steam` : ouverture de `steam://rungameid/<appId>` avec `ShellExecuteExW` (API Windows), qui trouve Steam comme gestionnaire de l'URL. Le plugin opener n'est finalement pas utilisé : la même fonction sert déjà aux `.lnk`.
 - `app` (.exe) : `std::process::Command`, avec le dossier de l'exe comme dossier de travail, sans attendre la fin du processus.
-- `app` (.lnk) : `ShellExecuteW` (API Windows), qui résout le raccourci comme un double-clic.
-- `web` : `<browser> --app=<url>`, ce qui ouvre une fenêtre dédiée sans barre d'adresse.
+- `app` (.lnk ou autre fichier) : `ShellExecuteExW` (API Windows), qui résout le raccourci comme un double-clic.
+- `web` : `<browser> --app=<url>`, ce qui ouvre une fenêtre dédiée sans barre d'adresse. `msedge`, `chrome` et `brave` sont retrouvés par Windows sans chemin complet ; l'URL doit être en `http(s)://`.
 
 ## 5. Étapes de développement
 

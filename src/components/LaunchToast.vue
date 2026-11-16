@@ -21,6 +21,8 @@ defineProps<{ message: string | null; detail?: string; error?: boolean }>();
 .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.error { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
 code { font: 12px var(--font-mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Une erreur doit se lire en entier : on autorise le retour à la ligne. */
+.toast.error code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .spin {
   width: 14px; height: 14px; border-radius: 50%; flex: none;
   border: 2px solid var(--line); border-top-color: var(--accent);
