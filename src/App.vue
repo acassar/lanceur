@@ -55,10 +55,32 @@ function keepSearchFocus(e: MouseEvent) {
   if (el === scroller.value && e.offsetX >= el.clientWidth) return;
   e.preventDefault();
 }
-// Retour sur la fenêtre (Alt+Tab, plus tard le raccourci global) : focus + sélection.
+// Retour sur la fenêtre (Alt+Tab, clic sur l'icône de la barre des tâches) :
+// focus + sélection du texte, pour pouvoir taper aussitôt.
 const onWindowFocus = () => searchBar.value?.focus();
 onMounted(() => window.addEventListener("focus", onWindowFocus));
 onBeforeUnmount(() => window.removeEventListener("focus", onWindowFocus));
+
+// Fenêtre rappelée par le raccourci global ou en relançant l'exe : on repart
+// d'une fenêtre « neuve » (recherche vide, tout afficher, première tuile).
+let stopShown: (() => void) | undefined;
+let unmounted = false;
+onMounted(async () => {
+  const stop = await ipc.onWindowShown(() => {
+    L.query.value = "";
+    L.rail.value = "all";
+    L.selected.value = 0;
+    scroller.value?.scrollTo({ top: 0 });
+    searchBar.value?.focus();
+  });
+  // Le composant a pu disparaître pendant l'attente (rechargement à chaud).
+  if (unmounted) stop();
+  else stopShown = stop;
+});
+onBeforeUnmount(() => {
+  unmounted = true;
+  stopShown?.();
+});
 
 async function launch(index?: number) {
   const tile = L.flat.value[index ?? L.selected.value];
@@ -118,7 +140,18 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(L.load);
+/** Charge la config, puis signale un raccourci global qui n'a pas pu être enregistré. */
+async function load() {
+  await L.load();
+  try {
+    const { error } = await ipc.getHotkeyStatus();
+    if (error) showToast({ message: "Raccourci global indisponible", detail: error, error: true });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+onMounted(load);
 </script>
 
 <template>
@@ -133,7 +166,7 @@ onMounted(L.load);
           v-if="L.error.value"
           :error="L.error.value"
           :compact="!!L.config.value"
-          @retry="L.load"
+          @retry="load"
           @open-folder="openConfigFolder"
         />
         <p v-if="L.config.value && L.sections.value.length === 0" class="empty">
