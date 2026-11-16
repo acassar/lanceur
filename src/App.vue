@@ -1,73 +1,158 @@
 <script setup lang="ts">
-// Étape 0 : écran de vérification. Il prouve que :
-//  1. le front Vue s'affiche dans la fenêtre Tauri ;
-//  2. le front sait appeler une commande Rust (`ping`).
-// Il sera remplacé par l'interface de la maquette à l'étape 1.
-import { onMounted, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import { getVersion } from "@tauri-apps/api/app";
+// Fenêtre du lanceur (variante B de la maquette) : recherche en haut,
+// rail de catégories à gauche, sections de tuiles à droite, barre d'état en bas.
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from "vue";
+import CategoryRail from "./components/CategoryRail.vue";
+import LaunchToast from "./components/LaunchToast.vue";
+import SearchBar from "./components/SearchBar.vue";
+import StatusBar from "./components/StatusBar.vue";
+import TileSection from "./components/TileSection.vue";
+import { useKeyboardNav, type Direction } from "./composables/useKeyboardNav";
+import { useLauncher } from "./composables/useLauncher";
+import { ipc } from "./lib/ipc";
+import { kindLabel, targetText } from "./lib/tiles";
 
-const reponse = ref("…");
-const version = ref("");
-const erreur = ref(false);
+const L = useLauncher();
+const scroller = ref<HTMLElement | null>(null);
+const searchBar = ref<InstanceType<typeof SearchBar> | null>(null);
+const { move, reveal } = useKeyboardNav(scroller, L.selected, () => L.flat.value.length);
 
-// Tauri injecte cet objet dans la fenêtre. Il est absent dans un simple navigateur (npm run dev).
-const dansTauri = "__TAURI_INTERNALS__" in window;
+const toast = ref<{ message: string; detail?: string; error?: boolean } | null>(null);
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+function showToast(t: NonNullable<typeof toast.value>) {
+  toast.value = t;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (toast.value = null), 2200);
+}
 
-onMounted(async () => {
-  if (!dansTauri) {
-    erreur.value = true;
-    reponse.value = "Pas de Rust ici : lancez l'app via Tauri pour tester l'appel.";
-    return;
-  }
-  try {
-    reponse.value = await invoke<string>("ping", { name: "Adrien" });
-    version.value = await getVersion();
-  } catch (e) {
-    // Dans Tauri, une erreur ici est un vrai problème (permission, nom de commande…) : on l'affiche.
-    erreur.value = true;
-    reponse.value = `Échec de l'appel Rust : ${String(e)}`;
-  }
+const status = computed(() => {
+  const tile = L.current.value;
+  const settings = L.config.value?.settings;
+  return tile && settings ? { kind: kindLabel(tile), target: targetText(tile, settings) } : { kind: "", target: "" };
 });
+
+// Couleur d'accent lue dans config.json.
+watchEffect(() => {
+  const accent = L.config.value?.settings.accent;
+  if (accent) document.documentElement.style.setProperty("--accent", accent);
+});
+
+// Nouvelle recherche ou catégorie : retour en haut de la liste.
+watch([L.query, L.rail], () => scroller.value?.scrollTo({ top: 0 }));
+// Changer de catégorie ne doit ni voler le focus de la recherche, ni sélectionner
+// son texte (sinon la lettre tapée juste après Tab effacerait la recherche).
+watch(L.rail, () => searchBar.value?.focus(false));
+
+// Le champ de recherche doit toujours garder le focus : c'est lui qui reçoit les
+// touches. Un clic sur une zone vide (barre d'état, fond de la grille…) le lui
+// retirerait et le clavier ne répondrait plus ; on annule donc ce mousedown.
+function keepSearchFocus(e: MouseEvent) {
+  const el = e.target as HTMLElement;
+  if (el === searchBar.value?.input) return;
+  // Clic sur la barre de défilement de la grille : on laisse faire le glisser.
+  if (el === scroller.value && e.offsetX >= el.clientWidth) return;
+  e.preventDefault();
+}
+// Retour sur la fenêtre (Alt+Tab, plus tard le raccourci global) : focus + sélection.
+const onWindowFocus = () => searchBar.value?.focus();
+onMounted(() => window.addEventListener("focus", onWindowFocus));
+onBeforeUnmount(() => window.removeEventListener("focus", onWindowFocus));
+
+async function launch(index?: number) {
+  const tile = L.flat.value[index ?? L.selected.value];
+  if (!tile || !L.config.value) return;
+  try {
+    await L.launch(index);
+    showToast({ message: `Lancement de ${tile.name}`, detail: targetText(tile, L.config.value.settings) });
+  } catch (e) {
+    showToast({ message: `Impossible de lancer ${tile.name}`, detail: String(e), error: true });
+  }
+}
+
+async function toggleFavorite(id: string) {
+  try {
+    await L.toggleFavorite(id);
+  } catch (e) {
+    showToast({ message: "Favori non enregistré", detail: String(e), error: true });
+  }
+}
+
+const ARROWS: Record<string, Direction> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+
+function onKeydown(e: KeyboardEvent) {
+  // Composition en cours (accents morts, IME) : la touche appartient à la saisie.
+  if (e.isComposing) return;
+  const input = e.target instanceof HTMLInputElement ? e.target : null;
+  const dir = ARROWS[e.key];
+  if (dir) {
+    // Gauche/droite déplacent le curseur dans le texte, sauf s'il est déjà au bord.
+    if (input && dir === "left" && input.selectionStart !== 0) return;
+    if (input && dir === "right" && input.selectionEnd !== input.value.length) return;
+    e.preventDefault();
+    move(dir);
+    nextTick(reveal);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    // Entrée maintenue : un seul lancement, pas une rafale.
+    if (!e.repeat) launch();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    if (L.query.value) L.query.value = "";
+    else ipc.hideWindow();
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    L.cycleRail(e.shiftKey ? -1 : 1);
+  } else if (e.ctrlKey && e.key.toLowerCase() === "d") {
+    e.preventDefault();
+    if (!e.repeat && L.current.value) toggleFavorite(L.current.value.id);
+  }
+}
+
+onMounted(L.load);
 </script>
 
 <template>
-  <main class="hello">
-    <div class="logo" aria-hidden="true">
-      <span></span><span></span><span></span><span class="rond"></span>
+  <div class="launcher" @keydown="onKeydown" @mousedown="keepSearchFocus">
+    <SearchBar ref="searchBar" v-model="L.query.value" :count="L.railItems.value[0]?.count ?? 0" :total="L.config.value?.tiles.length ?? 0" />
+
+    <div class="body">
+      <CategoryRail v-model="L.rail.value" :items="L.railItems.value" :tile-count="L.config.value?.tiles.length ?? 0" />
+
+      <div ref="scroller" class="scroll">
+        <p v-if="L.error.value" class="empty">Impossible de lire la configuration.<br /><code>{{ L.error.value }}</code></p>
+        <p v-else-if="L.config.value && L.sections.value.length === 0" class="empty">
+          <template v-if="L.query.value.trim()">Aucune tuile pour <strong>« {{ L.query.value.trim() }} »</strong>.</template>
+          <template v-else-if="L.rail.value === 'favorites'">Aucun favori pour l'instant. Sélectionnez une tuile et appuyez sur <kbd>Ctrl</kbd> <kbd>D</kbd>.</template>
+          <template v-else>Cette catégorie est vide.</template>
+          <br />Ajoutez des tuiles dans <code>config.json</code>.
+        </p>
+        <TileSection
+          v-for="section in L.sections.value"
+          :key="section.key"
+          :section="section"
+          :selected="L.selected.value"
+          :favorites="L.favoriteIds.value"
+          :query="L.query.value"
+          @launch="launch"
+          @hover="(i) => (L.selected.value = i)"
+          @toggle-favorite="toggleFavorite"
+        />
+      </div>
     </div>
-    <h1>Lanceur</h1>
-    <p :class="{ erreur }">{{ reponse }}</p>
-    <p v-if="version" class="note">Version {{ version }}</p>
-    <p class="note">Étape 0 : squelette Tauri 2 + Vue 3. L'interface arrive à l'étape 1.</p>
-  </main>
+
+    <StatusBar :kind="status.kind" :target="status.target" />
+    <LaunchToast :message="toast?.message ?? null" :detail="toast?.detail" :error="toast?.error" />
+  </div>
 </template>
 
-<style>
-:root {
-  --bg: #15171c;
-  --surface: #1d2027;
-  --fg: #ebe8e2;
-  --muted: #8d919b;
-  --accent: #f0a35e;
-  color-scheme: dark;
-  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-}
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
-#app { height: 100%; }
-</style>
-
 <style scoped>
-.hello {
-  height: 100%;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
-  text-align: center; padding: 0 24px;
+.launcher { height: 100%; display: flex; flex-direction: column; }
+.body { flex: 1; min-height: 0; display: flex; }
+.scroll {
+  flex: 1; min-width: 0; overflow-y: auto; padding: 0 10px 14px;
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
 }
-.logo { display: grid; grid-template-columns: repeat(2, 22px); gap: 6px; margin-bottom: 8px; }
-.logo span { width: 22px; height: 22px; border-radius: 6px; background: var(--surface); }
-.logo .rond { border-radius: 50%; background: var(--accent); }
-h1 { margin: 0; font-size: 22px; font-weight: 600; }
-p { margin: 0; color: var(--fg); }
-p.erreur { color: var(--accent); }
-.note { color: var(--muted); font-size: 13px; }
+.empty { padding: 48px 16px; margin: 0; text-align: center; color: var(--muted); }
+.empty strong { color: var(--fg); font-weight: 500; }
+.empty code { font: 12px var(--font-mono); }
 </style>
