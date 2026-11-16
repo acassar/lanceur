@@ -2,7 +2,7 @@ import type { Tile } from "./types";
 
 /** Minuscules et sans accents : « Élan » et « elan » se valent. */
 export function normalize(s: string): string {
-  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
 const WORD_SPLIT = /[\s\-:]+/;

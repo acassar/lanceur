@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Fenêtre du lanceur (variante B de la maquette) : recherche en haut,
 // rail de catégories à gauche, sections de tuiles à droite, barre d'état en bas.
-import { computed, nextTick, onMounted, ref, watch, watchEffect } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from "vue";
 import CategoryRail from "./components/CategoryRail.vue";
 import LaunchToast from "./components/LaunchToast.vue";
 import SearchBar from "./components/SearchBar.vue";
@@ -39,8 +39,24 @@ watchEffect(() => {
 
 // Nouvelle recherche ou catégorie : retour en haut de la liste.
 watch([L.query, L.rail], () => scroller.value?.scrollTo({ top: 0 }));
-// Changer de catégorie à la souris ne doit pas voler le focus de la recherche.
-watch(L.rail, () => searchBar.value?.focus());
+// Changer de catégorie ne doit ni voler le focus de la recherche, ni sélectionner
+// son texte (sinon la lettre tapée juste après Tab effacerait la recherche).
+watch(L.rail, () => searchBar.value?.focus(false));
+
+// Le champ de recherche doit toujours garder le focus : c'est lui qui reçoit les
+// touches. Un clic sur une zone vide (barre d'état, fond de la grille…) le lui
+// retirerait et le clavier ne répondrait plus ; on annule donc ce mousedown.
+function keepSearchFocus(e: MouseEvent) {
+  const el = e.target as HTMLElement;
+  if (el === searchBar.value?.input) return;
+  // Clic sur la barre de défilement de la grille : on laisse faire le glisser.
+  if (el === scroller.value && e.offsetX >= el.clientWidth) return;
+  e.preventDefault();
+}
+// Retour sur la fenêtre (Alt+Tab, plus tard le raccourci global) : focus + sélection.
+const onWindowFocus = () => searchBar.value?.focus();
+onMounted(() => window.addEventListener("focus", onWindowFocus));
+onBeforeUnmount(() => window.removeEventListener("focus", onWindowFocus));
 
 async function launch(index?: number) {
   const tile = L.flat.value[index ?? L.selected.value];
@@ -64,6 +80,8 @@ async function toggleFavorite(id: string) {
 const ARROWS: Record<string, Direction> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
 function onKeydown(e: KeyboardEvent) {
+  // Composition en cours (accents morts, IME) : la touche appartient à la saisie.
+  if (e.isComposing) return;
   const input = e.target instanceof HTMLInputElement ? e.target : null;
   const dir = ARROWS[e.key];
   if (dir) {
@@ -75,7 +93,8 @@ function onKeydown(e: KeyboardEvent) {
     nextTick(reveal);
   } else if (e.key === "Enter") {
     e.preventDefault();
-    launch();
+    // Entrée maintenue : un seul lancement, pas une rafale.
+    if (!e.repeat) launch();
   } else if (e.key === "Escape") {
     e.preventDefault();
     if (L.query.value) L.query.value = "";
@@ -85,7 +104,7 @@ function onKeydown(e: KeyboardEvent) {
     L.cycleRail(e.shiftKey ? -1 : 1);
   } else if (e.ctrlKey && e.key.toLowerCase() === "d") {
     e.preventDefault();
-    if (L.current.value) toggleFavorite(L.current.value.id);
+    if (!e.repeat && L.current.value) toggleFavorite(L.current.value.id);
   }
 }
 
@@ -93,7 +112,7 @@ onMounted(L.load);
 </script>
 
 <template>
-  <div class="launcher" @keydown="onKeydown">
+  <div class="launcher" @keydown="onKeydown" @mousedown="keepSearchFocus">
     <SearchBar ref="searchBar" v-model="L.query.value" :count="L.railItems.value[0]?.count ?? 0" :total="L.config.value?.tiles.length ?? 0" />
 
     <div class="body">

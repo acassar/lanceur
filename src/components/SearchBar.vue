@@ -5,9 +5,10 @@ defineProps<{ count: number; total: number }>();
 const query = defineModel<string>({ required: true });
 const input = ref<HTMLInputElement | null>(null);
 
-function focus() {
+/** Met le focus dans la recherche. `select` sélectionne aussi le texte (utile à l'ouverture). */
+function focus(select = true) {
   input.value?.focus();
-  input.value?.select();
+  if (select) input.value?.select();
 }
 onMounted(focus);
 defineExpose({ focus, input });
