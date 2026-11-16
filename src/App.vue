@@ -4,6 +4,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from "vue";
 import CategoryRail from "./components/CategoryRail.vue";
 import ConfigError from "./components/ConfigError.vue";
+import HotkeyWarning from "./components/HotkeyWarning.vue";
 import LaunchToast from "./components/LaunchToast.vue";
 import SearchBar from "./components/SearchBar.vue";
 import StatusBar from "./components/StatusBar.vue";
@@ -153,18 +154,14 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 /**
- * Charge la config, puis signale un raccourci global qui n'a pas pu être
- * enregistré. Le même message n'est montré qu'une fois, pas à chaque affichage.
+ * Charge la config, puis relit l'état du raccourci global. S'il n'a pas pu
+ * être enregistré, un bandeau reste affiché tant que le problème dure.
  */
-let lastHotkeyError: string | null = null;
+const hotkeyError = ref<string | null>(null);
 async function load() {
   await L.load();
   try {
-    const { error } = await ipc.getHotkeyStatus();
-    if (error && error !== lastHotkeyError) {
-      showToast({ message: "Raccourci global indisponible", detail: error, error: true });
-    }
-    lastHotkeyError = error;
+    hotkeyError.value = (await ipc.getHotkeyStatus()).error;
   } catch (e) {
     console.error(e);
   }
@@ -209,6 +206,7 @@ onMounted(load);
       </div>
     </div>
 
+    <HotkeyWarning v-if="hotkeyError" :message="hotkeyError" @open-folder="openConfigFolder" />
     <StatusBar :kind="status.kind" :target="status.target" />
     <LaunchToast :message="toast?.message ?? null" :detail="toast?.detail" :error="toast?.error" />
   </div>

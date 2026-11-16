@@ -17,7 +17,7 @@ Pour essayer une version de développement : onglet **Actions** → dernier run 
 
 | Touche | Effet |
 |---|---|
-| `Ctrl+Alt+Espace` | afficher / masquer la fenêtre, de n'importe où (réglable : `hotkey`) |
+| `Win+Alt+Espace` | afficher / masquer la fenêtre, de n'importe où (réglable : `hotkey`) |
 | taper du texte | rechercher (nom, début de mot, initiales : « bg3 » trouve *Baldur's Gate 3*) |
 | `Entrée` | lancer la tuile sélectionnée |
 | flèches | se déplacer dans la grille |
@@ -57,7 +57,7 @@ VS Code propose alors les champs, affiche leur description au survol et souligne
 
 | Réglage | Défaut | Rôle |
 |---|---|---|
-| `hotkey` | `"Ctrl+Alt+Space"` | raccourci global ; au moins un modificateur (`Ctrl`, `Alt`, `Shift`, `Super`) + une touche (`Space`, `A`…`Z`, `0`…`9`, `F1`…`F24`) |
+| `hotkey` | `"Super+Alt+Space"` | raccourci global ; au moins un modificateur (`Ctrl`, `Alt`, `Shift`, `Super`) + une touche (`Space`, `A`…`Z`, `0`…`9`, `F1`…`F24`) |
 | `hideAfterLaunch` | `true` | réduire la fenêtre après un lancement |
 | `hideOnBlur` | `true` | réduire la fenêtre quand elle perd le focus |
 | `accent` | `"#f0a35e"` | couleur d'accent de l'interface |

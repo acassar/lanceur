@@ -27,10 +27,12 @@
       "properties": {
         "hotkey": {
           "type": "string",
-          "default": "Ctrl+Alt+Space",
+          "default": "Super+Alt+Space",
           "description": "Raccourci global qui affiche ou masque la fenêtre. Au moins un modificateur (Ctrl, Alt, Shift, Super) suivi d'une touche : Space, A à Z, 0 à 9, F1 à F24…",
           "examples": [
-            "Ctrl+Alt+Space",
+            "Super+Alt+Space",
+            "Alt+Shift+Space",
+            "Ctrl+Alt+Shift+Space",
             "Ctrl+Shift+L",
             "Super+Alt+K"
           ]
