@@ -37,6 +37,11 @@ tauri-plugin-single-instance = "2"
 reqwest = "0.12"
 image = { version = "0.25", default-features = false, features = ["png", "ico", "jpeg", "gif", "bmp", "webp"] }
 base64 = "0.22"
+# Étape 7 : surveiller config.json pour recharger l'app dès qu'il est
+# enregistré. `notify` écoute le système de fichiers (ReadDirectoryChangesW
+# sous Windows) ; la version « debouncer » regroupe les rafales d'événements
+# qu'un éditeur produit en un seul enregistrement.
+notify-debouncer-mini = { version = "0.7", default-features = false }
 
 # Dépendances compilées uniquement pour Windows : l'API Win32 (ShellExecuteExW
 # pour ouvrir les .lnk et les URL steam://). Chaque « feature » active une

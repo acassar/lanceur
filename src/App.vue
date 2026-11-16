@@ -63,9 +63,18 @@ onBeforeUnmount(() => window.removeEventListener("focus", onWindowFocus));
 
 // Fenêtre rappelée par le raccourci global ou en relançant l'exe : on repart
 // d'une fenêtre « neuve » (recherche vide, tout afficher, première tuile).
-let stopShown: (() => void) | undefined;
+let stopListening: (() => void)[] = [];
 let unmounted = false;
+/** Garde la fonction d'arrêt d'une écoute, ou l'arrête aussitôt si le composant a disparu entre-temps. */
+function keep(stop: () => void) {
+  if (unmounted) stop();
+  else stopListening.push(stop);
+}
 onMounted(async () => {
+  // config.json enregistré (à la main ou par un favori) : on recharge tout de
+  // suite, même si la fenêtre est réduite. Un JSON invalide affiche l'erreur
+  // et laisse la dernière config valide à l'écran.
+  keep(await ipc.onConfigChanged(() => load()));
   const stop = await ipc.onWindowShown(() => {
     L.query.value = "";
     L.rail.value = "all";
@@ -77,12 +86,12 @@ onMounted(async () => {
     load();
   });
   // Le composant a pu disparaître pendant l'attente (rechargement à chaud).
-  if (unmounted) stop();
-  else stopShown = stop;
+  keep(stop);
 });
 onBeforeUnmount(() => {
   unmounted = true;
-  stopShown?.();
+  stopListening.forEach((stop) => stop());
+  stopListening = [];
 });
 
 async function launch(index?: number) {

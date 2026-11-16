@@ -23,6 +23,11 @@ use std::path::{Path, PathBuf};
 use crate::config::Target;
 use crate::error::AppError;
 
+/// Code d'erreur Windows « L'opération demandée nécessite une élévation »
+/// (`ERROR_ELEVATION_REQUIRED`). C'est une simple constante : pas besoin de
+/// l'API Win32 pour la comparer, donc ce code compile aussi hors Windows.
+const ERROR_ELEVATION_REQUIRED: i32 = 740;
+
 /// Ce qu'il faut exécuter concrètement. Une `enum` avec un cas par façon de
 /// lancer : `run` fera un `match` dessus.
 #[derive(Debug, Clone, PartialEq)]
@@ -145,11 +150,21 @@ pub fn run(action: Action) -> Result<(), AppError> {
             // (contrairement à `output()` ou `status()`, qui attendent la fin).
             // Le `Child` renvoyé est ignoré : le programme continue de tourner
             // même quand ce handle disparaît.
-            cmd.spawn().map_err(|e| AppError::Launch {
-                target: program.display().to_string(),
-                reason: e.to_string(),
-            })?;
-            Ok(())
+            match cmd.spawn() {
+                Ok(_) => Ok(()),
+                // Programme qui exige les droits administrateur (son manifeste
+                // dit `requireAdministrator`) : `Command` ne sait pas afficher
+                // l'invite UAC « Voulez-vous autoriser… ? », Windows refuse
+                // alors avec l'erreur 740. `ShellExecuteExW`, lui, l'affiche,
+                // comme un double-clic dans l'Explorateur. On réessaie par là.
+                Err(e) if e.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) => {
+                    shell_execute(&program, &join_args(&args), dir.as_deref())
+                }
+                Err(e) => Err(AppError::Launch {
+                    target: program.display().to_string(),
+                    reason: e.to_string(),
+                }),
+            }
         }
 
         Action::ShellOpen {
@@ -357,7 +372,15 @@ fn shell_execute(file: &Path, params: &str, dir: Option<&Path>) -> Result<(), Ap
                 // `..Default::default()` : tous les autres champs à zéro.
                 ..Default::default()
             };
-            let outcome = ShellExecuteExW(&mut info).map_err(|e| e.message());
+            let outcome = ShellExecuteExW(&mut info).map_err(|e| {
+                // « Non » cliqué sur l'invite UAC : `ERROR_CANCELLED` (1223),
+                // emballé par Windows dans un code HRESULT 0x800704C7.
+                if e.code().0 as u32 == 0x8007_04C7 {
+                    "lancement annulé (autorisation refusée)".to_string()
+                } else {
+                    e.message()
+                }
+            });
 
             // On ne libère COM que si notre appel l'a bien initialisé.
             if com.is_ok() {

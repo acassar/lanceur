@@ -99,9 +99,9 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// Applique les réglages de config.json qui concernent la fenêtre.
 ///
 /// Appelée au démarrage, puis à chaque lecture de la config (`get_config`).
-/// Le front relit la config chaque fois que la fenêtre réapparaît : si vous
-/// changez `hotkey` ou `hideOnBlur` à la main, ils s'appliquent au prochain
-/// affichage, sans redémarrer l'app.
+/// Le front relit la config dès que `config.json` est enregistré (watch.rs) et
+/// chaque fois que la fenêtre réapparaît : si vous changez `hotkey` ou
+/// `hideOnBlur` à la main, ils s'appliquent aussitôt, sans redémarrer l'app.
 ///
 /// Si le nouveau raccourci est invalide ou déjà pris par une autre app, on
 /// garde l'ancien (s'il y en avait un) et on retient l'erreur pour l'afficher.

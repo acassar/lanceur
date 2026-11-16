@@ -1,0 +1,270 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/acassar/lanceur/main/config.schema.json",
+  "title": "Configuration du Lanceur",
+  "description": "Fichier config.json du Lanceur (%APPDATA%\\io.github.acassar.lanceur\\config.json). Il est relu dès qu'il est enregistré.",
+  "type": "object",
+  "required": [
+    "version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Lien vers ce schéma : VS Code propose l'autocomplétion et signale les erreurs."
+    },
+    "version": {
+      "const": 1,
+      "description": "Version du format. Seule la version 1 existe."
+    },
+    "settings": {
+      "type": "object",
+      "description": "Réglages généraux. Chaque réglage absent prend sa valeur par défaut.",
+      "additionalProperties": false,
+      "properties": {
+        "hotkey": {
+          "type": "string",
+          "default": "Ctrl+Alt+Space",
+          "description": "Raccourci global qui affiche ou masque la fenêtre. Au moins un modificateur (Ctrl, Alt, Shift, Super) suivi d'une touche : Space, A à Z, 0 à 9, F1 à F24…",
+          "examples": [
+            "Ctrl+Alt+Space",
+            "Ctrl+Shift+L",
+            "Super+Alt+K"
+          ]
+        },
+        "hideAfterLaunch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Réduire la fenêtre après le lancement d'une tuile."
+        },
+        "hideOnBlur": {
+          "type": "boolean",
+          "default": true,
+          "description": "Réduire la fenêtre quand elle perd le focus."
+        },
+        "accent": {
+          "type": "string",
+          "default": "#f0a35e",
+          "description": "Couleur d'accent de l'interface (couleur CSS, par ex. #f0a35e).",
+          "examples": [
+            "#f0a35e",
+            "#5e9ef0"
+          ]
+        },
+        "browser": {
+          "type": "string",
+          "default": "msedge",
+          "description": "Navigateur des apps web (ouvertes en fenêtre d'application avec --app) : msedge, chrome, brave, ou le chemin complet d'un navigateur basé sur Chromium.",
+          "examples": [
+            "msedge",
+            "chrome",
+            "brave"
+          ]
+        },
+        "recentsCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "default": 4,
+          "description": "Nombre de tuiles dans la section Récents (0 pour la masquer)."
+        }
+      }
+    },
+    "categories": {
+      "type": "array",
+      "description": "Catégories, dans l'ordre d'affichage du rail.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Identifiant unique (minuscules, chiffres, - et _). all, favorites, recents et results sont réservés.",
+            "allOf": [
+              {
+                "$ref": "#/definitions/id"
+              },
+              {
+                "not": {
+                  "enum": [
+                    "all",
+                    "favorites",
+                    "recents",
+                    "results"
+                  ]
+                }
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Nom affiché."
+          }
+        }
+      }
+    },
+    "favorites": {
+      "type": "array",
+      "description": "Ids des tuiles favorites, dans l'ordre d'affichage. L'étoile ou Ctrl+D les modifient aussi.",
+      "items": {
+        "$ref": "#/definitions/id"
+      },
+      "uniqueItems": true
+    },
+    "tiles": {
+      "type": "array",
+      "description": "Les tuiles.",
+      "items": {
+        "$ref": "#/definitions/tile"
+      }
+    }
+  },
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "Identifiant : minuscules, chiffres, - et _."
+    },
+    "tile": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "category",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Identifiant unique et stable (sert aux favoris, aux récents et au cache d'icônes).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/id"
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "description": "Nom affiché sur la tuile."
+        },
+        "category": {
+          "type": "string",
+          "description": "Id d'une catégorie de \"categories\"."
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optionnel : image (PNG, JPEG, ICO…), .exe/.lnk ou URL https:// qui remplace l'icône trouvée automatiquement."
+        },
+        "type": {
+          "enum": [
+            "steam",
+            "app",
+            "web"
+          ],
+          "description": "steam : jeu Steam ; app : exécutable ou raccourci .lnk ; web : site ouvert en fenêtre d'application."
+        },
+        "appId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "(steam) Numéro du jeu sur Steam, visible dans l'URL de sa page du magasin."
+        },
+        "path": {
+          "type": "string",
+          "description": "(app) Chemin de l'exe ou du .lnk. Les variables comme %APPDATA% ou %LOCALAPPDATA% sont développées.",
+          "examples": [
+            "%LOCALAPPDATA%\\Discord\\Update.exe"
+          ]
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "(app) Arguments passés au programme (optionnel)."
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^\\s\"]*$",
+          "description": "(web) Adresse du site, en http:// ou https://."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "steam"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "appId"
+            ],
+            "properties": {
+              "path": false,
+              "args": false,
+              "url": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "app"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "appId": false,
+              "url": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "web"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "appId": false,
+              "path": false,
+              "args": false
+            }
+          }
+        }
+      ]
+    }
+  }
+}
