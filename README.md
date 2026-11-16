@@ -9,11 +9,11 @@ Lanceur d'apps Windows personnel (Tauri 2 + Vue 3 + TypeScript) : une icône dan
 
 L'app est compilée par GitHub Actions sur un runner Windows, pas besoin de Rust sur votre PC.
 
-1. Onglet **Actions** → dernier run « build » réussi.
-2. En bas de la page, artefact **lanceur-windows** → zip contenant `Lanceur_x.y.z_x64_fr-FR.msi` / `_en-US.msi` et `Lanceur_x.y.z_x64-setup.exe`.
+1. Onglet **Actions** → dernier run « build » réussi. La CI tourne à chaque push sur `main`, sur chaque PR, et à la demande (*Run workflow*, sur n'importe quelle branche).
+2. En bas de la page, artefact **lanceur-windows** → zip contenant `Lanceur_x.y.z_x64_en-US.msi` et `Lanceur_x.y.z_x64-setup.exe` (l'un ou l'autre suffit).
 3. Lancer l'un des deux installeurs. L'installeur n'étant pas signé, SmartScreen affiche un avertissement : *Informations complémentaires* → *Exécuter quand même*.
 
-Pour une version : `git tag v0.1.0 && git push --tags`, puis publier la Release brouillon créée par la CI.
+Pour une version : mettre à jour `version` dans `package.json` **et** `src-tauri/Cargo.toml`, puis `git tag v0.1.0 && git push --tags`, et publier la Release brouillon créée par la CI. La CI refuse un tag qui ne correspond pas à ces versions.
 
 ## Développer
 

@@ -15,7 +15,7 @@
 ///   envoyée au front en JSON.
 #[tauri::command]
 fn ping(name: &str) -> String {
-    format!("Bonjour {name}, le Rust répond (Lanceur v{})", env!("CARGO_PKG_VERSION"))
+    format!("Bonjour {name}, le Rust répond !")
 }
 
 /// Construit et démarre l'application.
@@ -24,8 +24,6 @@ fn ping(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // Les plugins ajoutent des capacités (ici : ouvrir des URL / fichiers).
-        .plugin(tauri_plugin_opener::init())
         // On déclare la liste des commandes appelables depuis le front.
         .invoke_handler(tauri::generate_handler![ping])
         // `generate_context!` lit tauri.conf.json au moment de la compilation.

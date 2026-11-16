@@ -5,17 +5,28 @@
 // Il sera remplacé par l'interface de la maquette à l'étape 1.
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 
 const reponse = ref("…");
+const version = ref("");
 const erreur = ref(false);
 
+// Tauri injecte cet objet dans la fenêtre. Il est absent dans un simple navigateur (npm run dev).
+const dansTauri = "__TAURI_INTERNALS__" in window;
+
 onMounted(async () => {
-  try {
-    reponse.value = await invoke<string>("ping", { name: "Adrien" });
-  } catch {
-    // Dans un navigateur (npm run dev), il n'y a pas de Rust derrière.
+  if (!dansTauri) {
     erreur.value = true;
     reponse.value = "Pas de Rust ici : lancez l'app via Tauri pour tester l'appel.";
+    return;
+  }
+  try {
+    reponse.value = await invoke<string>("ping", { name: "Adrien" });
+    version.value = await getVersion();
+  } catch (e) {
+    // Dans Tauri, une erreur ici est un vrai problème (permission, nom de commande…) : on l'affiche.
+    erreur.value = true;
+    reponse.value = `Échec de l'appel Rust : ${String(e)}`;
   }
 });
 </script>
@@ -27,6 +38,7 @@ onMounted(async () => {
     </div>
     <h1>Lanceur</h1>
     <p :class="{ erreur }">{{ reponse }}</p>
+    <p v-if="version" class="note">Version {{ version }}</p>
     <p class="note">Étape 0 : squelette Tauri 2 + Vue 3. L'interface arrive à l'étape 1.</p>
   </main>
 </template>
