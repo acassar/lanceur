@@ -1,6 +1,7 @@
 // Point d'accès unique aux commandes Rust. Les composants n'appellent jamais
 // invoke() directement : ils passent par cet objet typé.
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { createMockIpc } from "./ipc.mock";
 import type { Config } from "./types";
 
@@ -11,9 +12,26 @@ export interface Ipc {
   launch(id: string): Promise<string[]>;
   /** Ajoute ou retire un favori et renvoie la nouvelle liste. */
   toggleFavorite(id: string): Promise<string[]>;
+  /** Réduit la fenêtre dans la barre des tâches (Échap, après un lancement). */
   hideWindow(): Promise<void>;
+  /** Raccourci global configuré, et pourquoi il n'a pas pu être enregistré le cas échéant. */
+  getHotkeyStatus(): Promise<HotkeyStatus>;
+  /**
+   * Appelle `callback` chaque fois que la fenêtre réapparaît (raccourci global,
+   * exe relancé). Renvoie une fonction qui arrête l'écoute.
+   */
+  onWindowShown(callback: () => void): Promise<() => void>;
   /** Ouvre le dossier de config.json dans l'Explorateur. */
   openConfigFolder(): Promise<void>;
+}
+
+/** Événement émis par Rust quand la fenêtre réapparaît (`SHOWN_EVENT` dans window.rs). */
+export const WINDOW_SHOWN_EVENT = "window-shown";
+
+/** Miroir de `HotkeyStatus` dans window.rs. */
+export interface HotkeyStatus {
+  hotkey: string;
+  error: string | null;
 }
 
 /**
@@ -37,13 +55,15 @@ export function toIpcError(e: unknown): IpcError {
 }
 
 function createTauriIpc(): Ipc {
-  // Étape 3 : config, récents et lancement sont réels. Favoris et masquage
-  // restent simulés en mémoire jusqu'aux étapes 4 et 5.
+  // Étape 4 : tout est réel sauf les favoris, simulés en mémoire jusqu'à l'étape 5.
   const simulated = createMockIpc(() => invoke<Config>("get_config"), []);
   return {
     ...simulated,
     getRecents: () => invoke<string[]>("get_recents"),
     launch: (id) => invoke<string[]>("launch", { id }),
+    hideWindow: () => invoke("hide_window"),
+    getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
+    onWindowShown: (callback) => listen(WINDOW_SHOWN_EVENT, () => callback()),
     openConfigFolder: () => invoke("open_config_folder"),
   };
 }

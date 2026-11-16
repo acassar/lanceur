@@ -180,6 +180,7 @@ enum Target {
 | `get_icon` | `id` | chemin PNG ou `null` | extrait ou télécharge l'icône, avec cache |
 | `open_config_folder` | – | `()` | ouvre le dossier dans l'Explorateur |
 | `hide_window` | – | `()` | réduit la fenêtre (Échap, après lancement) ; l'icône reste dans la barre des tâches |
+| `get_hotkey_status` | – | `{ hotkey, error }` | raccourci global configuré, et l'erreur s'il n'a pas pu être enregistré (invalide, ou déjà pris par une autre app) |
 
 Événement émis par Rust vers le front : `window-shown`. Le front y vide la recherche et redonne le focus au champ.
 

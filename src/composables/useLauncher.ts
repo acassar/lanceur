@@ -139,7 +139,8 @@ export function useLauncher() {
     recents.value = await ipc.launch(tile.id);
     if (config.value?.settings.hideAfterLaunch) {
       query.value = "";
-      await ipc.hideWindow();
+      // La tuile est lancée : un échec ici ne doit pas afficher « Impossible de lancer ».
+      await ipc.hideWindow().catch(console.error);
     }
     return tile;
   }

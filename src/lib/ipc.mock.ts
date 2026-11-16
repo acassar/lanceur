@@ -67,7 +67,7 @@ const SAMPLE: Config = {
 export function createMockIpc(
   loadConfig: () => Promise<Config> = async () => structuredClone(SAMPLE),
   initialRecents = ["bg3", "discord", "instagram", "cs2"],
-): Pick<Ipc, "getConfig" | "getRecents" | "launch" | "toggleFavorite" | "hideWindow"> {
+): Omit<Ipc, "openConfigFolder"> {
   let config: Config | null = null;
   let recents = initialRecents;
 
@@ -98,6 +98,13 @@ export function createMockIpc(
     },
     async hideWindow() {
       console.info("[ipc mock] hide_window");
+    },
+    async getHotkeyStatus() {
+      return { hotkey: config?.settings.hotkey ?? "Ctrl+Alt+Space", error: null };
+    },
+    // Dans un navigateur, la fenêtre ne « réapparaît » jamais.
+    async onWindowShown() {
+      return () => {};
     },
   };
 }

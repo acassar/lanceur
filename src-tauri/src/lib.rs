@@ -9,9 +9,11 @@ mod config;
 mod error;
 mod launch;
 mod state;
+mod window;
 
 use config::Config;
 use error::AppError;
+use tauri::Manager;
 
 /// Commande `get_config` : le front l'appelle avec `invoke("get_config")`.
 ///
@@ -27,8 +29,13 @@ async fn get_config(app: tauri::AppHandle) -> Result<Config, AppError> {
     // `?` : si `config_dir` renvoie une erreur, `get_config` s'arrête et la
     // renvoie telle quelle. Sinon, `dir` reçoit le chemin.
     let dir = config::config_dir(&app)?;
+    let config = config::load_or_create(&dir)?;
+    // Le raccourci et `hideOnBlur` suivent la config qu'on vient de lire.
+    // Si le fichier est invalide, on n'arrive pas ici (`?` au-dessus) : les
+    // derniers réglages valides restent en place.
+    window::sync_settings(&app, &config.settings);
     // Dernière expression sans `;` : c'est la valeur renvoyée par la fonction.
-    config::load_or_create(&dir)
+    Ok(config)
 }
 
 /// Commande `get_recents` : ids des derniers lancements, du plus récent au
@@ -109,6 +116,26 @@ async fn open_config_folder(app: tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Commande `hide_window` : réduit la fenêtre (Échap, après un lancement).
+///
+/// Sans `async`, la commande tourne sur le thread principal : c'est très
+/// rapide ici, et c'est le thread qui gère la fenêtre.
+#[tauri::command]
+fn hide_window(app: tauri::AppHandle) {
+    window::hide(&app);
+}
+
+/// Commande `get_hotkey_status` : le raccourci configuré et, s'il n'a pas pu
+/// être enregistré, pourquoi. Le front l'affiche dans un message.
+///
+/// `tauri::State<'_, WindowState>` : Tauri injecte l'état confié avec
+/// `manage` au démarrage. `'_` est une *durée de vie* : l'emprunt de l'état ne
+/// dure que le temps de l'appel (le compilateur s'occupe du détail).
+#[tauri::command]
+fn get_hotkey_status(state: tauri::State<'_, window::WindowState>) -> window::HotkeyStatus {
+    state.hotkey_status()
+}
+
 /// Programme qui ouvre un dossier. Sous Windows, on donne le chemin complet
 /// d'`explorer.exe` (dans `%SystemRoot%`) plutôt que de le chercher dans le PATH.
 /// Sur Linux/macOS (développement uniquement), on utilise l'équivalent.
@@ -129,12 +156,44 @@ fn file_manager() -> std::path::PathBuf {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Les *plugins* ajoutent des fonctions à Tauri, comme des modules NestJS.
+        //
+        // Instance unique : en premier, pour que la 2ᵉ copie de l'app s'arrête
+        // avant d'avoir rien initialisé. Le plugin appelle alors cette closure
+        // dans la 1ʳᵉ copie, qui réaffiche sa fenêtre. `|app, _args, _cwd|` sont
+        // les paramètres de la closure ; le `_` dit « paramètre inutilisé ».
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            window::show(app);
+        }))
+        .plugin(window::shortcut_plugin())
+        // `manage` confie une valeur à Tauri ; on la retrouve ensuite avec
+        // `app.state::<WindowState>()` ou un paramètre `State<…>` de commande.
+        .manage(window::WindowState::default())
+        // `setup` s'exécute une fois, au démarrage, avant l'affichage.
+        .setup(|app| {
+            let handle = app.handle();
+            // Réglages de la fenêtre lus dans config.json. Si le fichier est
+            // invalide, on prend les réglages par défaut : le raccourci marche
+            // quand même, et le front affiche l'erreur de config.
+            let settings = config::config_dir(handle)
+                .and_then(|dir| config::load_or_create(&dir))
+                .map(|c| c.settings)
+                .unwrap_or_default();
+            window::sync_settings(handle, &settings);
+            if let Some(main) = handle.get_webview_window("main") {
+                window::center_on_active_monitor(handle, &main);
+            }
+            Ok(())
+        })
+        .on_window_event(window::on_window_event)
         // On déclare la liste des commandes appelables depuis le front.
         .invoke_handler(tauri::generate_handler![
             get_config,
             get_recents,
             launch,
-            open_config_folder
+            open_config_folder,
+            hide_window,
+            get_hotkey_status
         ])
         // `generate_context!` lit tauri.conf.json au moment de la compilation.
         .run(tauri::generate_context!())
