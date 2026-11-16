@@ -36,7 +36,7 @@ describe("createMockIpc, fenêtre", () => {
   it("renvoie le raccourci de la config sans erreur", async () => {
     const ipc = createMockIpc();
     await ipc.getConfig();
-    expect(await ipc.getHotkeyStatus()).toEqual({ hotkey: "Ctrl+Alt+Space", error: null });
+    expect(await ipc.getHotkeyStatus()).toEqual({ hotkey: "Super+Alt+Space", error: null });
     const stop = await ipc.onWindowShown(() => {});
     expect(typeof stop).toBe("function");
   });

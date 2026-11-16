@@ -9,7 +9,7 @@ import type { Config } from "./types";
 const SAMPLE: Config = {
   version: 1,
   settings: {
-    hotkey: "Ctrl+Alt+Space",
+    hotkey: "Super+Alt+Space",
     hideAfterLaunch: true,
     hideOnBlur: true,
     accent: "#f0a35e",
@@ -103,7 +103,7 @@ export function createMockIpc(
       console.info("[ipc mock] hide_window");
     },
     async getHotkeyStatus() {
-      return { hotkey: config?.settings.hotkey ?? "Ctrl+Alt+Space", error: null };
+      return { hotkey: config?.settings.hotkey ?? "Super+Alt+Space", error: null };
     },
     // Dans un navigateur, la fenêtre ne « réapparaît » jamais.
     async onWindowShown() {

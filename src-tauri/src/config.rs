@@ -99,7 +99,7 @@ impl Default for Settings {
         Settings {
             // `.to_string()` transforme un `&str` (texte figé dans l'exe)
             // en `String` (texte qui appartient à la struct).
-            hotkey: "Ctrl+Alt+Space".to_string(),
+            hotkey: "Super+Alt+Space".to_string(),
             hide_after_launch: true,
             hide_on_blur: true,
             accent: "#f0a35e".to_string(),

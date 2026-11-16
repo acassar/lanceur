@@ -4,7 +4,7 @@
 //! dans la barre des tâches, et un clic dessus restaure la fenêtre.
 //!
 //! Trois façons de faire réapparaître la fenêtre, qui passent toutes par [`show`] :
-//! - le raccourci global (`Ctrl+Alt+Espace` par défaut, réglage `hotkey`) ;
+//! - le raccourci global (`Win+Alt+Espace` par défaut, réglage `hotkey`) ;
 //! - relancer l'exe (plugin *single-instance*, branché dans `lib.rs`) ;
 //! - cliquer sur l'icône de la barre des tâches (géré par Windows lui-même).
 //!
@@ -14,6 +14,7 @@
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
@@ -64,7 +65,7 @@ pub struct WindowState {
 
 #[derive(Default)]
 struct Hotkey {
-    /// Texte du raccourci actif, tel qu'écrit dans config.json (`"Ctrl+Alt+Space"`).
+    /// Texte du raccourci actif, tel qu'écrit dans config.json (`"Super+Alt+Space"`).
     text: String,
     /// Raccourci réellement enregistré auprès de Windows, s'il y en a un.
     registered: Option<Shortcut>,
@@ -168,7 +169,7 @@ pub fn sync_settings(app: &AppHandle, settings: &Settings) {
     }
 }
 
-/// Lit un raccourci écrit comme `"Ctrl+Alt+Space"`. Les noms de touches sont
+/// Lit un raccourci écrit comme `"Super+Alt+Space"`. Les noms de touches sont
 /// ceux de la crate `global-hotkey` : `Ctrl`, `Alt`, `Shift`, `Super` (touche
 /// Windows), puis une touche : `Space`, `A`…`Z`, `0`…`9`, `F1`…`F24`…
 /// La casse n'a pas d'importance.
@@ -216,12 +217,40 @@ pub fn toggle(app: &AppHandle) {
     let Some(window) = main_window(app) else {
         return;
     };
-    // `unwrap_or(false)` : en cas d'erreur, on considère la fenêtre comme
-    // non affichée, et on l'affiche.
-    let in_front = window.is_visible().unwrap_or(false)
-        && !window.is_minimized().unwrap_or(true)
-        && window.is_focused().unwrap_or(false);
-    if in_front { hide(app) } else { show(app) }
+    if is_in_front(&window) {
+        hide(app)
+    } else {
+        show(app)
+    }
+}
+
+/// La fenêtre est-elle affichée, non réduite, et au premier plan ?
+///
+/// Sous Windows, on ne se fie pas à `is_focused()` : le clavier n'est pas tenu
+/// par notre fenêtre elle-même mais par la WebView2 qu'elle contient (une
+/// fenêtre « enfant »), et `is_focused()` répond alors `false` alors que la
+/// fenêtre est bien devant. On demande donc directement à Windows quelle est
+/// la fenêtre au premier plan (`GetForegroundWindow`) et on compare.
+fn is_in_front(window: &WebviewWindow) -> bool {
+    if !window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(true) {
+        return false;
+    }
+    // `#[cfg(windows)]` : ce bloc n'est compilé que pour Windows. Sur les autres
+    // systèmes (dev sous Linux), c'est le bloc `#[cfg(not(windows))]` qui compte.
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        // `unsafe` : appel direct à l'API Win32, que le compilateur Rust ne peut
+        // pas vérifier. Cette fonction-là ne fait que lire, sans risque.
+        let foreground = unsafe { GetForegroundWindow() };
+        // `is_ok_and(…)` : vrai seulement si `hwnd()` réussit *et* que la
+        // condition est remplie ; si `hwnd()` échoue, on répond « pas devant ».
+        window.hwnd().is_ok_and(|hwnd| hwnd.0 == foreground.0)
+    }
+    #[cfg(not(windows))]
+    {
+        window.is_focused().unwrap_or(false)
+    }
 }
 
 /// Affiche la fenêtre au centre de l'écran où se trouve la souris, lui donne
@@ -236,7 +265,19 @@ pub fn show(app: &AppHandle) {
     let _ = window.show();
     center_on_active_monitor(app, &window);
     let _ = window.set_focus();
+    focus_webview(&window);
     let _ = window.emit(SHOWN_EVENT, ());
+}
+
+/// Donne le focus clavier à la page (la WebView) en plus de la fenêtre.
+///
+/// `set_focus()` ne s'occupe que de la fenêtre. Quand elle sort d'une
+/// réduction, Windows peut lui rendre le focus *avant* qu'elle soit restaurée :
+/// la WebView refuse alors de le prendre, et la frappe n'arrive plus dans la
+/// recherche. `as_ref()` donne accès à la partie « webview » de la fenêtre.
+fn focus_webview(window: &WebviewWindow) {
+    let webview: &tauri::Webview = window.as_ref();
+    let _ = webview.set_focus();
 }
 
 /// « Masque » la fenêtre : la réduit dans la barre des tâches (décision 1A).
@@ -246,15 +287,81 @@ pub fn hide(app: &AppHandle) {
     }
 }
 
+/// Délai avant de réduire la fenêtre après une perte de focus (`hideOnBlur`).
+const BLUR_DELAY: Duration = Duration::from_millis(200);
+
 /// Appelée par Tauri à chaque événement de la fenêtre (branchée dans `lib.rs`).
-/// Perte de focus + `hideOnBlur` : on réduit la fenêtre.
+///
+/// - Perte de focus + `hideOnBlur` : on réduit la fenêtre, après vérification.
+/// - Retour de la fenêtre (clic sur l'icône de la barre des tâches) : on
+///   redonne le focus à la recherche.
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
-    if let tauri::WindowEvent::Focused(false) = event {
-        let state = window.state::<WindowState>();
-        if state.hide_on_blur.load(Ordering::Relaxed) && !window.is_minimized().unwrap_or(false) {
-            let _ = window.minimize();
+    match event {
+        tauri::WindowEvent::Focused(false) => {
+            if window
+                .state::<WindowState>()
+                .hide_on_blur
+                .load(Ordering::Relaxed)
+            {
+                hide_after_blur(window.app_handle().clone());
+            }
         }
+        // Une restauration change la taille (de 0×0 à la vraie taille).
+        tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+            if let Some(main) = main_window(window.app_handle())
+                && is_in_front(&main)
+            {
+                focus_webview(&main);
+            }
+        }
+        _ => {}
     }
+}
+
+/// Réduit la fenêtre si, un instant après une perte de focus, elle n'est
+/// toujours pas au premier plan.
+///
+/// Pourquoi attendre ? Sous Windows, l'événement « focus perdu » vient de la
+/// WebView2 et arrive *en différé*. Pendant qu'une fenêtre sort d'une
+/// réduction, le focus passe de main en main (barre des tâches, fenêtre, page)
+/// et la WebView peut signaler une perte de focus qui n'en est pas une. Avant
+/// ce correctif, on réduisait aussitôt : la fenêtre se restaurait puis se
+/// re-réduisait dans la foulée, et semblait ne plus jamais réapparaître.
+///
+/// On attend donc `BLUR_DELAY`, puis on demande à Windows qui est réellement au
+/// premier plan : si c'est encore nous, c'était une fausse alerte.
+fn hide_after_blur(app: AppHandle) {
+    // `std::thread::spawn` lance un nouveau thread, pour attendre sans bloquer
+    // le thread principal (qui fait tourner toute l'interface). `move` donne à
+    // la closure la propriété de `app` : elle l'emporte avec elle dans le thread.
+    std::thread::spawn(move || {
+        std::thread::sleep(BLUR_DELAY);
+        // Les fenêtres se manipulent depuis le thread principal :
+        // `run_on_main_thread` y renvoie la suite du travail.
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let Some(window) = main_window(&handle) else {
+                return;
+            };
+            let enabled = handle
+                .state::<WindowState>()
+                .hide_on_blur
+                .load(Ordering::Relaxed);
+            let minimized = window.is_minimized().unwrap_or(true);
+            if !enabled || minimized {
+                return;
+            }
+            if is_in_front(&window) {
+                // Fausse alerte : la fenêtre est toujours devant, mais la page a
+                // pu perdre le clavier. On le lui rend, sinon la frappe n'arrive
+                // plus dans la recherche, et un vrai départ vers une autre app ne
+                // serait plus signalé (donc plus de réduction automatique).
+                focus_webview(&window);
+            } else {
+                let _ = window.minimize();
+            }
+        });
+    });
 }
 
 /// Centre la fenêtre sur l'écran qui contient la souris (l'« écran actif »).
@@ -309,8 +416,8 @@ mod tests {
 
     #[test]
     fn lit_le_raccourci_par_defaut() {
-        let s = parse_hotkey("Ctrl+Alt+Space").unwrap();
-        assert_eq!(s.mods, Modifiers::CONTROL | Modifiers::ALT);
+        let s = parse_hotkey(&crate::config::Settings::default().hotkey).unwrap();
+        assert_eq!(s.mods, Modifiers::SUPER | Modifiers::ALT);
         assert_eq!(s.key, Code::Space);
     }
 

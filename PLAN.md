@@ -112,7 +112,7 @@ Quand vous ajoutez ou retirez un favori, l'app ne remplace que le tableau `"favo
   "$schema": "https://raw.githubusercontent.com/acassar/lanceur/main/config.schema.json",
   "version": 1,
   "settings": {
-    "hotkey": "Ctrl+Alt+Space",
+    "hotkey": "Super+Alt+Space",
     "hideAfterLaunch": true,
     "hideOnBlur": true,
     "accent": "#f0a35e",
