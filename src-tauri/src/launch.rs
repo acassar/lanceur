@@ -450,9 +450,8 @@ mod tests {
                 file: r"C:\Users\A\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Code.lnk"
                     .into(),
                 params: r#"--new-window "C:\Mon projet""#.into(),
-                dir: Some(
-                    r"C:\Users\A\AppData\Roaming\Microsoft\Windows\Start Menu\Programs".into()
-                ),
+                // Pas de dossier imposé : le raccourci a son « Démarrer dans ».
+                dir: None,
                 must_exist: true,
             }
         );
