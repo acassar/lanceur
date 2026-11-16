@@ -33,6 +33,12 @@ pub enum AppError {
         source: std::io::Error,
     },
 
+    /// Le fichier n'est pas encodé en UTF-8 (ex. « ANSI » ou « Unicode » dans le Bloc-notes).
+    #[error(
+        "config.json n'est pas enregistré en UTF-8. Dans le Bloc-notes : Fichier > Enregistrer sous, Encodage « UTF-8 »."
+    )]
+    Encoding { path: PathBuf },
+
     /// Le fichier n'est pas du JSON valide, ou un champ manque / a le mauvais type.
     #[error("config.json, ligne {line}, colonne {column} : {message}")]
     Json {
@@ -62,6 +68,7 @@ impl AppError {
         match self {
             AppError::NoConfigDir(_) => None,
             AppError::Io { path, .. }
+            | AppError::Encoding { path }
             | AppError::Json { path, .. }
             | AppError::Invalid { path, .. } => Some(path),
         }

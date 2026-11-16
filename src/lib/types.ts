@@ -1,5 +1,5 @@
-// Types partagés du front. Ils décrivent le contenu de config.json et
-// seront le miroir exact des structs Rust de l'étape 2.
+// Types partagés du front. Ils décrivent le contenu de config.json, tel que
+// la commande Rust get_config le renvoie (structs de src-tauri/src/config.rs).
 
 /** Réglages généraux (section "settings" de config.json). */
 export interface Settings {

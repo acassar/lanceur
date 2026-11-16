@@ -3,11 +3,13 @@
 //! Le fichier vit dans `%APPDATA%\io.github.acassar.lanceur\config.json`.
 //! S'il n'existe pas, on le crée à partir de `config.example.json` (embarqué
 //! dans l'exe à la compilation). S'il est invalide, on renvoie une erreur
-//! précise (ligne, colonne, message) que le front affiche.
+//! en français (ligne, colonne, message, tuile concernée) que le front affiche.
 //!
-//! Les structs ci-dessous sont le miroir exact des types TypeScript de
-//! `src/lib/types.ts`. `serde` fait la conversion JSON <-> Rust pour nous.
+//! Les structs ci-dessous produisent le même JSON que les types TypeScript de
+//! `src/lib/types.ts` (seules différences : `$schema`, ignoré par le front, et
+//! `args`, toujours envoyé, vide au besoin). `serde` fait la conversion JSON <-> Rust.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -42,10 +44,14 @@ const SUPPORTED_VERSION: u32 = 1;
 //
 // `#[serde(rename_all = "camelCase")]` : le champ Rust `hide_after_launch`
 // (convention snake_case de Rust) correspond à `hideAfterLaunch` dans le JSON.
+//
+// `deny_unknown_fields` : un champ inconnu (faute de frappe comme `hideonblur`)
+// est refusé au lieu d'être ignoré en silence. Pour les tuiles, ce contrôle
+// est fait à la main dans `unknown_tile_fields` (incompatible avec `flatten`).
 
 /// Le fichier `config.json` complet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
     /// Lien vers le JSON Schema pour l'autocomplétion dans VS Code (étape 7).
     /// `Option<String>` : la valeur peut être absente (`None`) ou présente (`Some(..)`).
@@ -74,7 +80,7 @@ pub struct Config {
 /// Réglages généraux. Chaque champ absent du JSON prend sa valeur par défaut
 /// (grâce au `#[serde(default)]` posé sur la struct entière).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct Settings {
     pub hotkey: String,
     pub hide_after_launch: bool,
@@ -103,6 +109,7 @@ impl Default for Settings {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Category {
     pub id: String,
     pub name: String,
@@ -161,23 +168,18 @@ pub fn load_or_create(dir: &Path) -> Result<Config, AppError> {
     // `join` crée un nouveau `PathBuf` (chemin possédé) : dir + "config.json".
     let path = dir.join(FILE_NAME);
 
-    // `match` sur le résultat de la lecture : trois cas possibles.
+    // `match` sur le résultat de la lecture : un cas par situation.
     let text = match fs::read_to_string(&path) {
         // Lu avec succès : `text` devient propriétaire de la chaîne lue.
         Ok(text) => text,
-        // Le fichier n'existe pas encore : premier démarrage.
+        // Le fichier n'existe pas encore : premier démarrage. On écrit
+        // l'exemple puis on le relit (au cas où une autre instance de l'app
+        // l'aurait créé en même temps, c'est sa version qui compte).
         Err(e) if e.kind() == ErrorKind::NotFound => {
             write_example(dir, &path)?;
-            EXAMPLE.to_string()
+            read(&path)?
         }
-        // Toute autre erreur (droits, fichier verrouillé…) : on la remonte.
-        Err(source) => {
-            return Err(AppError::Io {
-                action: "de lire",
-                path,
-                source,
-            });
-        }
+        Err(source) => return Err(read_error(path, source)),
     };
 
     // `parse` ne fait qu'emprunter `text` (`&text`) et `path` (`&path`) :
@@ -185,41 +187,215 @@ pub fn load_or_create(dir: &Path) -> Result<Config, AppError> {
     parse(&text, &path)
 }
 
+/// Lit le fichier en texte, en convertissant l'erreur éventuelle.
+fn read(path: &Path) -> Result<String, AppError> {
+    fs::read_to_string(path).map_err(|source| read_error(path.to_path_buf(), source))
+}
+
+/// Erreur de lecture : on distingue le cas « pas de l'UTF-8 », fréquent quand
+/// le fichier est enregistré en « ANSI » ou « Unicode » dans le Bloc-notes.
+fn read_error(path: PathBuf, source: std::io::Error) -> AppError {
+    if source.kind() == ErrorKind::InvalidData {
+        AppError::Encoding { path }
+    } else {
+        AppError::Io {
+            action: "de lire",
+            path,
+            source,
+        }
+    }
+}
+
 /// Transforme le texte JSON en `Config`, puis vérifie sa cohérence.
 ///
 /// Séparée de la lecture du disque pour pouvoir la tester sans fichier.
 pub fn parse(text: &str, path: &Path) -> Result<Config, AppError> {
-    // `map_err` transforme l'erreur de serde_json en notre `AppError`.
-    // Le `?` final : en cas d'erreur, on sort de la fonction avec ce `Err`.
-    let config: Config = serde_json::from_str(text).map_err(|e| json_error(e, path))?;
+    // Certains éditeurs Windows ajoutent un « BOM » (caractère invisible U+FEFF)
+    // au début des fichiers UTF-8. serde_json le refuse : on le retire.
+    // `strip_prefix` renvoie `Some(reste)` si le texte commence par le BOM,
+    // `None` sinon ; `unwrap_or(text)` garde alors le texte tel quel.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
 
-    let problems = validate(&config);
+    let invalid = |problems| AppError::Invalid {
+        path: path.to_path_buf(),
+        problems,
+    };
+    if text.trim().is_empty() {
+        return Err(invalid(vec!["le fichier est vide".to_string()]));
+    }
+
+    // `serde_path_to_error` enveloppe serde_json pour savoir *où* dans la
+    // structure l'erreur s'est produite (ex. `tiles[3].appId`).
+    let mut de = serde_json::Deserializer::from_str(text);
+    // `map_err` transforme l'erreur en notre `AppError`.
+    // Le `?` final : en cas d'erreur, on sort de la fonction avec ce `Err`.
+    let config: Config =
+        serde_path_to_error::deserialize(&mut de).map_err(|e| json_error(e, text, path))?;
+
+    let mut problems = validate(&config);
+    problems.extend(unknown_tile_fields(text));
     if problems.is_empty() {
         Ok(config)
     } else {
-        // `path.to_path_buf()` : on copie le chemin emprunté pour que l'erreur
-        // en possède sa propre version (elle peut vivre plus longtemps que `path`).
-        Err(AppError::Invalid {
-            path: path.to_path_buf(),
-            problems,
-        })
+        Err(invalid(problems))
     }
 }
 
-/// Convertit une erreur serde_json en `AppError::Json`, avec ligne et colonne.
-fn json_error(e: serde_json::Error, path: &Path) -> AppError {
-    let (line, column) = (e.line(), e.column());
+/// Convertit une erreur serde_json en `AppError::Json`, avec ligne, colonne
+/// et un message en français.
+fn json_error(
+    e: serde_path_to_error::Error<serde_json::Error>,
+    text: &str,
+    path: &Path,
+) -> AppError {
+    // `e.path()` : où l'erreur s'est produite, `e.inner()` : l'erreur serde_json.
+    let location = e.path().to_string();
+    let inner = e.inner();
+    let line = inner.line();
+    let column = char_column(text, line, inner.column());
+
     // Le message de serde_json finit par « at line 3 column 5 » : on retire ce
     // suffixe puisque la ligne et la colonne sont déjà affichées à part.
-    let full = e.to_string();
-    let suffix = format!(" at line {line} column {column}");
-    let message = full.strip_suffix(&suffix).unwrap_or(&full).to_string();
+    let full = inner.to_string();
+    let suffix = format!(" at line {} column {}", line, inner.column());
+    let mut message = translate(full.strip_suffix(&suffix).unwrap_or(&full));
+
+    // Erreur dans une tuile : on dit laquelle. serde lit chaque tuile en entier
+    // avant de choisir sa variante (`type`), donc la position indiquée est
+    // souvent la fin de la tuile, pas le champ fautif : le nom aide à la retrouver.
+    if let Some(tile) = tile_label(text, &location) {
+        message = format!("{tile} : {message}");
+    } else if inner.is_data() && location != "." {
+        message = format!("{location} : {message}");
+    }
+
     AppError::Json {
         path: path.to_path_buf(),
         line,
         column,
         message,
     }
+}
+
+/// serde_json compte les colonnes en *octets* ; un éditeur compte en
+/// *caractères* (« é » fait 2 octets en UTF-8). On convertit.
+fn char_column(text: &str, line: usize, byte_column: usize) -> usize {
+    let Some(src) = text.lines().nth(line.saturating_sub(1)) else {
+        return byte_column;
+    };
+    let mut end = byte_column.min(src.len());
+    // On recule jusqu'à une frontière de caractère pour ne pas couper un « é ».
+    while !src.is_char_boundary(end) {
+        end -= 1;
+    }
+    src[..end].chars().count()
+}
+
+/// Traduit les messages de serde_json les plus courants.
+fn translate(msg: &str) -> String {
+    // Paires (début du message anglais, traduction). Le reste du message
+    // (noms de champs, types attendus) est recollé tel quel.
+    const PREFIXES: &[(&str, &str)] = &[
+        ("missing field ", "champ manquant : "),
+        ("unknown field ", "champ inconnu : "),
+        ("unknown variant ", "valeur inconnue : "),
+        ("duplicate field ", "champ en double : "),
+        ("invalid type: ", "type invalide : "),
+        ("invalid value: ", "valeur invalide : "),
+        ("trailing comma", "virgule en trop"),
+        (
+            "key must be a string",
+            "nom de champ attendu entre guillemets (les commentaires // ne sont pas autorisés)",
+        ),
+        (
+            "EOF while parsing",
+            "fin du fichier inattendue (accolade ou crochet non fermé ?)",
+        ),
+        ("expected `,` or `}`", "virgule ou `}` attendue"),
+        ("expected `,` or `]`", "virgule ou `]` attendue"),
+        ("expected `:`", "`:` attendu"),
+        ("expected value", "valeur attendue"),
+        ("trailing characters", "texte en trop après la fin du JSON"),
+    ];
+    for (en, fr) in PREFIXES {
+        if let Some(rest) = msg.strip_prefix(en) {
+            // Pour les messages entièrement traduits, on ignore la suite anglaise.
+            return if en.ends_with(' ') {
+                // « expected one of `a`, `b` » -> « attendus : `a`, `b` »
+                let rest = rest
+                    .replace(", expected one of ", " (attendus : ")
+                    .replace(", expected ", " (attendu : ");
+                let close = if rest.contains(" (attendu") { ")" } else { "" };
+                format!("{fr}{rest}{close}")
+            } else {
+                fr.to_string()
+            };
+        }
+    }
+    msg.to_string()
+}
+
+/// Si `location` désigne une tuile (`tiles[3]…`), renvoie « tuile "id" » ou
+/// « tuile n°4 » quand elle n'a pas d'id lisible.
+fn tile_label(text: &str, location: &str) -> Option<String> {
+    // `?` marche aussi avec `Option` : `None` fait sortir de la fonction.
+    let rest = location.strip_prefix("tiles[")?;
+    let index: usize = rest.split(']').next()?.parse().ok()?;
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    Some(match value["tiles"][index]["id"].as_str() {
+        Some(id) => format!("tuile \"{id}\""),
+        None => format!("tuile n°{}", index + 1),
+    })
+}
+
+/// Champs autorisés dans une tuile, selon son `type`.
+fn allowed_tile_fields(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "steam" => &["appId"],
+        "app" => &["path", "args"],
+        "web" => &["url"],
+        _ => &[],
+    }
+}
+
+/// Signale les champs mal orthographiés dans les tuiles (`"ico"` au lieu de
+/// `"icon"`…). serde ne peut pas le faire lui-même à cause du `flatten`.
+fn unknown_tile_fields(text: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    let Some(tiles) = value["tiles"].as_array() else {
+        return Vec::new();
+    };
+    let mut problems = Vec::new();
+    for tile in tiles {
+        let Some(obj) = tile.as_object() else {
+            continue;
+        };
+        let kind = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let id = obj.get("id").and_then(|t| t.as_str()).unwrap_or("?");
+        for key in obj.keys() {
+            let common = ["id", "name", "category", "icon", "type"].contains(&key.as_str());
+            if !common && !allowed_tile_fields(kind).contains(&key.as_str()) {
+                problems.push(format!(
+                    "tuile \"{id}\" : champ inconnu \"{key}\" pour le type \"{kind}\""
+                ));
+            }
+        }
+    }
+    problems
+}
+
+/// Ids de catégorie réservés par l'interface (entrées du rail, sections).
+const RESERVED_CATEGORY_IDS: &[&str] = &["all", "favorites", "recents", "results"];
+
+/// Un id valide : minuscules, chiffres, `-` et `_`. Il sert de nom de fichier
+/// pour le cache d'icônes (étape 6), d'où cette règle stricte.
+fn is_valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
 /// Vérifie ce que serde ne peut pas vérifier seul. Renvoie la liste des
@@ -236,10 +412,18 @@ fn validate(config: &Config) -> Vec<String> {
 
     // Un `HashSet` refuse les doublons : `insert` renvoie `false` si la valeur
     // y était déjà. Les éléments sont des `&str` empruntés à `config` : aucune copie.
-    let mut category_ids = std::collections::HashSet::new();
+    let mut category_ids = HashSet::new();
     for c in &config.categories {
-        if c.id.trim().is_empty() {
-            problems.push(format!("la catégorie \"{}\" n'a pas d'id", c.name));
+        if !is_valid_id(&c.id) {
+            problems.push(format!(
+                "la catégorie \"{}\" a un id invalide \"{}\" (minuscules, chiffres, - et _ uniquement)",
+                c.name, c.id
+            ));
+        } else if RESERVED_CATEGORY_IDS.contains(&c.id.as_str()) {
+            problems.push(format!(
+                "l'id de catégorie \"{}\" est réservé par l'interface, choisissez-en un autre",
+                c.id
+            ));
         } else if !category_ids.insert(c.id.as_str()) {
             problems.push(format!(
                 "l'id de catégorie \"{}\" est utilisé plusieurs fois",
@@ -248,10 +432,13 @@ fn validate(config: &Config) -> Vec<String> {
         }
     }
 
-    let mut tile_ids = std::collections::HashSet::new();
+    let mut tile_ids = HashSet::new();
     for t in &config.tiles {
-        if t.id.trim().is_empty() {
-            problems.push(format!("la tuile \"{}\" n'a pas d'id", t.name));
+        if !is_valid_id(&t.id) {
+            problems.push(format!(
+                "la tuile \"{}\" a un id invalide \"{}\" (minuscules, chiffres, - et _ uniquement)",
+                t.name, t.id
+            ));
         } else if !tile_ids.insert(t.id.as_str()) {
             problems.push(format!(
                 "l'id de tuile \"{}\" est utilisé plusieurs fois",
@@ -266,9 +453,12 @@ fn validate(config: &Config) -> Vec<String> {
         }
     }
 
+    let mut favorite_ids = HashSet::new();
     for f in &config.favorites {
         if !tile_ids.contains(f.as_str()) {
             problems.push(format!("le favori \"{f}\" ne correspond à aucune tuile"));
+        } else if !favorite_ids.insert(f.as_str()) {
+            problems.push(format!("le favori \"{f}\" apparaît plusieurs fois"));
         }
     }
 
@@ -277,24 +467,32 @@ fn validate(config: &Config) -> Vec<String> {
 
 /// Crée le dossier de l'app et y écrit la config d'exemple.
 fn write_example(dir: &Path, path: &Path) -> Result<(), AppError> {
-    // Petite fonction locale (une *closure*) pour construire l'erreur d'écriture.
-    // `move` n'est pas nécessaire : elle emprunte `path` le temps de l'appel.
-    let io_err = |source| AppError::Io {
-        action: "de créer",
-        path: path.to_path_buf(),
-        source,
-    };
-
-    fs::create_dir_all(dir).map_err(io_err)?;
+    fs::create_dir_all(dir).map_err(|source| create_error(dir, source))?;
     // `create_new(true)` : échoue si le fichier existe déjà, pour ne jamais
     // écraser une config de l'utilisateur.
-    let mut file = fs::OpenOptions::new()
+    let mut file = match fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
-        .map_err(io_err)?;
-    file.write_all(EXAMPLE.as_bytes()).map_err(io_err)?;
+    {
+        Ok(file) => file,
+        // Créé entre-temps (par une autre instance) : rien à faire.
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => return Ok(()),
+        Err(source) => return Err(create_error(path, source)),
+    };
+    // `|source| …` est une *closure* : une fonction anonyme, comme une fonction
+    // fléchée JS. Elle *emprunte* `path` (lecture seule) pour construire l'erreur.
+    file.write_all(EXAMPLE.as_bytes())
+        .map_err(|source| create_error(path, source))?;
     Ok(()) // `()` : « rien », l'équivalent de `void`
+}
+
+fn create_error(path: &Path, source: std::io::Error) -> AppError {
+    AppError::Io {
+        action: "de créer",
+        path: path.to_path_buf(),
+        source,
+    }
 }
 
 /// Dossier de configuration de l'app (`%APPDATA%\io.github.acassar.lanceur`).
@@ -455,5 +653,78 @@ mod tests {
                 .unwrap()
                 .starts_with("config.json, ligne 1")
         );
+    }
+
+    #[test]
+    fn accepte_le_bom_utf8() {
+        let text = format!("\u{feff}{EXAMPLE}");
+        assert!(parse(&text, &p()).is_ok());
+    }
+
+    #[test]
+    fn fichier_vide() {
+        let err = parse_err("  \n");
+        assert!(err.to_string().contains("vide"), "{err}");
+    }
+
+    #[test]
+    fn erreur_dans_une_tuile_nomme_la_tuile() {
+        let err = parse_err(
+            r#"{ "version": 1, "categories": [{ "id": "c", "name": "C" }],
+                 "tiles": [
+                   { "id": "ok", "name": "A", "category": "c", "type": "web", "url": "u" },
+                   { "id": "cs2", "name": "B", "category": "c", "type": "steam", "appId": "730" }
+                 ] }"#,
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("tuile \"cs2\""), "{msg}");
+        assert!(msg.contains("type invalide"), "{msg}");
+    }
+
+    #[test]
+    fn champs_inconnus_refuses() {
+        let err = parse_err(r#"{ "version": 1, "settings": { "hideonblur": false } }"#);
+        assert!(err.to_string().contains("hideonblur"), "{err}");
+
+        let err = parse_err(
+            r#"{ "version": 1, "categories": [{ "id": "c", "name": "C" }],
+                 "tiles": [{ "id": "a", "name": "A", "category": "c", "type": "web", "url": "u", "ico": "x.png" }] }"#,
+        );
+        assert!(err.to_string().contains("\"ico\""), "{err}");
+    }
+
+    #[test]
+    fn ids_reserves_invalides_et_favoris_en_double() {
+        let err = parse_err(
+            r#"{ "version": 1,
+                 "categories": [{ "id": "favorites", "name": "F" }, { "id": "Jeux", "name": "J" }, { "id": "c", "name": "C" }],
+                 "favorites": ["a", "a"],
+                 "tiles": [{ "id": "a", "name": "A", "category": "c", "type": "web", "url": "u" }] }"#,
+        );
+        let AppError::Invalid { problems, .. } = err else {
+            panic!("{err:?}")
+        };
+        assert_eq!(problems.len(), 3, "{problems:#?}");
+    }
+
+    #[test]
+    fn colonne_comptee_en_caracteres() {
+        // « é » fait 2 octets en UTF-8 : sans conversion, la colonne serait décalée de 2.
+        let text = r#"{ "version": 1, "categories": [{ "id": "c", "name": "éé" "x": 1 }] }"#;
+        let err = parse_err(text);
+        let AppError::Json { column, .. } = err else {
+            panic!("{err:?}")
+        };
+        // Position (en caractères, à partir de 1) du `"x"` fautif.
+        let expected = text[..text.find("\"x\"").unwrap()].chars().count() + 1;
+        assert_eq!(column, expected);
+    }
+
+    #[test]
+    fn messages_en_francais() {
+        let err = parse_err("{ \"version\": 1, }");
+        assert!(err.to_string().contains("virgule en trop"), "{err}");
+        let err = parse_err("{ // commentaire\n \"version\": 1 }");
+        assert!(err.to_string().contains("commentaires"), "{err}");
     }
 }
