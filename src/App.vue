@@ -23,7 +23,8 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined;
 function showToast(t: NonNullable<typeof toast.value>) {
   toast.value = t;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (toast.value = null), 2200);
+  // Une erreur reste affichée plus longtemps, le temps de la lire.
+  toastTimer = setTimeout(() => (toast.value = null), t.error ? 6000 : 2200);
 }
 
 const status = computed(() => {
@@ -66,7 +67,7 @@ async function launch(index?: number) {
     await L.launch(index);
     showToast({ message: `Lancement de ${tile.name}`, detail: targetText(tile, L.config.value.settings) });
   } catch (e) {
-    showToast({ message: `Impossible de lancer ${tile.name}`, detail: String(e), error: true });
+    showToast({ message: `Impossible de lancer ${tile.name}`, detail: toIpcError(e).message, error: true });
   }
 }
 

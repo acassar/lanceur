@@ -6,8 +6,7 @@
 //!
 //! On regroupe ici toutes les erreurs possibles dans une seule `enum` (`AppError`).
 //! Chaque variante décrit un cas précis et porte les informations utiles
-//! (chemin du fichier, ligne, colonne…). Les étapes suivantes ajouteront des
-//! variantes (lancement, icônes…).
+//! (chemin du fichier, ligne, colonne…).
 
 use std::path::PathBuf;
 
@@ -55,6 +54,24 @@ pub enum AppError {
         path: PathBuf,
         problems: Vec<String>,
     },
+
+    /// Le front a demandé une tuile qui n'existe pas (config modifiée entre-temps).
+    #[error("Aucune tuile « {0} » dans config.json (rechargez la fenêtre)")]
+    UnknownTile(String),
+
+    /// Le fichier à lancer n'existe pas : chemin mal écrit, app désinstallée…
+    #[error("Fichier introuvable : {}", .0.display())]
+    NotFound(PathBuf),
+
+    /// URL d'une tuile web refusée (pas en http(s), espaces, guillemets).
+    #[error(
+        "URL refusée : « {0} ». Elle doit commencer par https:// et ne contenir ni espace ni guillemet"
+    )]
+    InvalidUrl(String),
+
+    /// Windows a refusé de lancer la cible (`reason` vient de Windows).
+    #[error("Impossible de lancer {target} : {reason}")]
+    Launch { target: String, reason: String },
 }
 
 impl AppError {
@@ -66,7 +83,11 @@ impl AppError {
         // `match` doit couvrir toutes les variantes : si on en ajoute une à
         // l'enum, le compilateur nous signalera chaque `match` à compléter.
         match self {
-            AppError::NoConfigDir(_) => None,
+            AppError::NoConfigDir(_)
+            | AppError::UnknownTile(_)
+            | AppError::InvalidUrl(_)
+            | AppError::Launch { .. } => None,
+            AppError::NotFound(path) => Some(path),
             AppError::Io { path, .. }
             | AppError::Encoding { path }
             | AppError::Json { path, .. }

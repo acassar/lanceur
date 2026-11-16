@@ -37,11 +37,13 @@ export function toIpcError(e: unknown): IpcError {
 }
 
 function createTauriIpc(): Ipc {
-  // Étape 2 : seule la lecture de la config est réelle. Lancement, récents,
-  // favoris et masquage restent simulés en mémoire jusqu'aux étapes 3 à 5.
+  // Étape 3 : config, récents et lancement sont réels. Favoris et masquage
+  // restent simulés en mémoire jusqu'aux étapes 4 et 5.
   const simulated = createMockIpc(() => invoke<Config>("get_config"), []);
   return {
     ...simulated,
+    getRecents: () => invoke<string[]>("get_recents"),
+    launch: (id) => invoke<string[]>("launch", { id }),
     openConfigFolder: () => invoke("open_config_folder"),
   };
 }

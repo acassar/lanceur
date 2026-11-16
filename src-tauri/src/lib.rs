@@ -7,6 +7,8 @@
 
 mod config;
 mod error;
+mod launch;
+mod state;
 
 use config::Config;
 use error::AppError;
@@ -27,6 +29,46 @@ async fn get_config(app: tauri::AppHandle) -> Result<Config, AppError> {
     let dir = config::config_dir(&app)?;
     // Dernière expression sans `;` : c'est la valeur renvoyée par la fonction.
     config::load_or_create(&dir)
+}
+
+/// Commande `get_recents` : ids des derniers lancements, du plus récent au
+/// plus ancien (au plus `recentsCount`, et seulement des tuiles qui existent).
+#[tauri::command]
+async fn get_recents(app: tauri::AppHandle) -> Result<Vec<String>, AppError> {
+    let dir = config::config_dir(&app)?;
+    let config = config::load_or_create(&dir)?;
+    Ok(state::visible_recents(&state::load(&dir), &config))
+}
+
+/// Commande `launch` : `invoke("launch", { id: "cs2" })`.
+///
+/// Tauri lit l'argument `id` dans l'objet JSON envoyé par le front et le
+/// convertit en `String`. On relit la config (elle a pu être modifiée à la
+/// main depuis l'ouverture), on lance la tuile, puis on met à jour les récents.
+/// Renvoie la nouvelle liste des récents, que le front affiche aussitôt.
+#[tauri::command]
+async fn launch(app: tauri::AppHandle, id: String) -> Result<Vec<String>, AppError> {
+    let dir = config::config_dir(&app)?;
+    let config = config::load_or_create(&dir)?;
+
+    // `iter().find(…)` renvoie `Option<&Tile>` ; `ok_or_else` le transforme
+    // en `Result` : `None` devient l'erreur `UnknownTile`, et `?` la renvoie.
+    let tile = config
+        .tiles
+        .iter()
+        .find(|t| t.id == id)
+        .ok_or_else(|| AppError::UnknownTile(id.clone()))?;
+
+    launch::launch(&tile.target, &config.settings.browser)?;
+
+    // La tuile est lancée : si l'écriture des récents échoue, on ne veut pas
+    // afficher « Impossible de lancer ». On le signale dans la console et on
+    // renvoie les récents sans ce lancement.
+    let state = state::record_launch(&dir, &tile.id).unwrap_or_else(|e| {
+        eprintln!("récents non enregistrés : {e}");
+        state::load(&dir)
+    });
+    Ok(state::visible_recents(&state, &config))
 }
 
 /// Commande `open_config_folder` : ouvre le dossier de `config.json` dans
@@ -71,7 +113,12 @@ fn file_manager() -> std::path::PathBuf {
 pub fn run() {
     tauri::Builder::default()
         // On déclare la liste des commandes appelables depuis le front.
-        .invoke_handler(tauri::generate_handler![get_config, open_config_folder])
+        .invoke_handler(tauri::generate_handler![
+            get_config,
+            get_recents,
+            launch,
+            open_config_folder
+        ])
         // `generate_context!` lit tauri.conf.json au moment de la compilation.
         .run(tauri::generate_context!())
         // `expect` : si le démarrage échoue, on arrête l'app avec ce message.
