@@ -4,8 +4,9 @@
 //
 // Dans l'app (Tauri), ipc.ts utilise les vraies commandes Rust à la place.
 import type { Ipc } from "./ipc";
+import { appsCategory } from "./detect";
 import { applyTileOrder } from "./reorder";
-import type { Category, Config, SteamGame, Tile, TileDraft } from "./types";
+import type { Category, Config, DetectedApp, SteamGame, Tile, TileDraft } from "./types";
 
 export const SAMPLE: Config = {
   version: 1,
@@ -70,6 +71,19 @@ export const SAMPLE_STEAM_GAMES: SteamGame[] = [
   { appId: 413150, name: "Stardew Valley" },
 ];
 
+/** Raccourcis du menu Démarrer simulés (VS Code a déjà une tuile dans SAMPLE). */
+const START_MENU = "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs";
+const USER_START_MENU = "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs";
+export const SAMPLE_APPS: Omit<DetectedApp, "inConfig">[] = [
+  { name: "7-Zip File Manager", path: `${START_MENU}\\7-Zip\\7-Zip File Manager.lnk`, folder: "7-Zip" },
+  { name: "Discord", path: `${USER_START_MENU}\\Discord Inc\\Discord.lnk`, folder: "Discord Inc" },
+  { name: "GIMP 3", path: `${START_MENU}\\GIMP 3.lnk`, folder: null },
+  { name: "Notepad++", path: `${START_MENU}\\Notepad++.lnk`, folder: null },
+  { name: "Steam", path: `${START_MENU}\\Steam\\Steam.lnk`, folder: "Steam" },
+  { name: "Visual Studio Code", path: `${USER_START_MENU}\\Visual Studio Code.lnk`, folder: null },
+  { name: "VLC media player", path: `${START_MENU}\\VideoLAN\\VLC media player.lnk`, folder: "VideoLAN" },
+];
+
 /**
  * @param loadConfig d'où vient la config : les données d'exemple par défaut
  *   (les tests en passent une autre).
@@ -87,6 +101,8 @@ export function createMockIpc(
   const importedTiles: Tile[] = [];
   // Modifications faites dans l'éditeur, réappliquées de même à chaque rechargement.
   const edits: ((c: Config) => void)[] = [];
+  /** Ids uniques même pour plusieurs ajouts dans la même milliseconde (import). */
+  let tileCounter = 0;
   function edit(change: (c: Config) => void) {
     edits.push(change);
     if (config) change(config);
@@ -136,7 +152,7 @@ export function createMockIpc(
       return [...config.favorites];
     },
     async addTile(draft) {
-      const tile = tileOf(`tuile-${Date.now()}`, "", draft);
+      const tile = tileOf(`tuile-${Date.now()}-${++tileCounter}`, "", draft);
       edit((c) => {
         if (c.tiles.some((t) => t.id === tile.id)) return;
         tile.category = categoryOf(c, draft);
@@ -201,6 +217,28 @@ export function createMockIpc(
       return { added, category: category.name };
     },
     async onSteamImportRequested() {
+      return () => {};
+    },
+    async detectApps() {
+      const cfg = config ?? (await this.getConfig());
+      const apps = cfg.tiles.flatMap((t) => (t.type === "app" ? [t] : []));
+      const paths = new Set(apps.map((t) => t.path.toLowerCase()));
+      const names = new Set(apps.map((t) => t.name.trim().toLowerCase()));
+      return SAMPLE_APPS.map((a) => ({ ...a, inConfig: paths.has(a.path.toLowerCase()) || names.has(a.name.toLowerCase()) }));
+    },
+    async importApps(paths) {
+      const fresh = (await this.detectApps()).filter((a) => !a.inConfig && paths.includes(a.path));
+      const cfg = config!;
+      const category = appsCategory(cfg);
+      const existing = cfg.categories.find((c) => c.name === category);
+      const added: string[] = [];
+      for (const app of fresh) {
+        const tile = await this.addTile({ name: app.name, category: existing?.id ?? "", newCategory: existing ? undefined : "Applications", type: "app", path: app.path, args: [] });
+        added.push(tile.id);
+      }
+      return { added, category };
+    },
+    async onDetectAppsRequested() {
       return () => {};
     },
     // Pas d'extraction d'icônes dans le navigateur : les monogrammes restent.

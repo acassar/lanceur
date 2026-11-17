@@ -59,6 +59,9 @@ windows = { version = "0.62", features = [
   # requis par la struct SHELLEXECUTEINFOW (champ hkeyClass) ; sert aussi à
   # l'étape 6 pour lire le dossier de Steam dans le registre
   "Win32_System_Registry",
+  # V2 (détection des applications) : lire la cible d'un raccourci .lnk
+  # (IShellLinkW::GetPath, dont la signature utilise WIN32_FIND_DATAW)
+  "Win32_Storage_FileSystem",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }

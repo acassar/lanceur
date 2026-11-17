@@ -1,8 +1,9 @@
 //! Icône dans la zone de notification (à droite de la barre des tâches).
 //!
 //! - Clic gauche : affiche la fenêtre, ou la masque si elle était devant.
-//! - Clic droit : un menu « Afficher le lanceur », « Importer les jeux
-//!   Steam… », « Ouvrir le dossier de config » et « Quitter ».
+//! - Clic droit : un menu « Afficher le lanceur », « Détecter les
+//!   applications… », « Importer les jeux Steam… », « Ouvrir le dossier de
+//!   config » et « Quitter ».
 //!
 //! Avec cette icône, la croix de la fenêtre ne quitte plus l'app : elle la
 //! masque, comme Échap (voir `window::on_window_event`). On quitte par le menu.
@@ -23,10 +24,14 @@ pub const TRAY_ID: &str = "main";
 const SHOW: &str = "show";
 const OPEN_CONFIG: &str = "open-config";
 const IMPORT_STEAM: &str = "import-steam";
+const DETECT_APPS: &str = "detect-apps";
 
 /// Événement envoyé au front pour qu'il ouvre la fenêtre d'import Steam
 /// (`STEAM_IMPORT_EVENT` dans src/lib/ipc.ts).
 pub const STEAM_IMPORT_EVENT: &str = "steam-import-requested";
+/// Événement envoyé au front pour qu'il ouvre la détection des applications
+/// (`DETECT_APPS_EVENT` dans src/lib/ipc.ts).
+pub const DETECT_APPS_EVENT: &str = "detect-apps-requested";
 const QUIT: &str = "quit";
 
 /// Crée l'icône. Appelée une fois, dans le `setup` de `lib.rs`.
@@ -39,6 +44,13 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         app,
         &[
             &MenuItem::with_id(app, SHOW, "Afficher le lanceur", true, None::<&str>)?,
+            &MenuItem::with_id(
+                app,
+                DETECT_APPS,
+                "Détecter les applications…",
+                true,
+                None::<&str>,
+            )?,
             &MenuItem::with_id(
                 app,
                 IMPORT_STEAM,
@@ -92,6 +104,10 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
         IMPORT_STEAM => {
             window::show(app);
             let _ = app.emit(STEAM_IMPORT_EVENT, ());
+        }
+        DETECT_APPS => {
+            window::show(app);
+            let _ = app.emit(DETECT_APPS_EVENT, ());
         }
         OPEN_CONFIG => {
             if let Err(e) = crate::open_config_dir(app) {

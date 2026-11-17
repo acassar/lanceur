@@ -1,11 +1,16 @@
 <script setup lang="ts">
 // Écran d'accueil affiché tant que config.json ne contient aucune tuile (premier
-// démarrage). Il explique où est le fichier et donne un exemple à copier ; le
-// fichier étant relu dès qu'il est enregistré, les tuiles apparaissent aussitôt.
-// Il propose aussi d'importer d'un clic les jeux Steam installés.
+// démarrage). Deux façons de commencer :
+// - « Détecter mes applications » : le lanceur cherche les applications du
+//   menu Démarrer et les jeux Steam, on coche ce qu'on veut garder ;
+// - « Partir de zéro » : ajouter ses tuiles une à une, ou éditer config.json
+//   (où est le fichier, exemple à copier ; il est relu dès qu'il est enregistré).
 import { ref } from "vue";
 
-const emit = defineEmits<{ openFolder: []; copyFailed: []; importSteam: []; addTile: [] }>();
+const emit = defineEmits<{ openFolder: []; copyFailed: []; detect: []; addTile: [] }>();
+
+/** « Partir de zéro » choisi : on affiche les explications pour ajouter ses tuiles. */
+const manual = ref(false);
 
 /**
  * Exemple à coller dans config.json à la place des trois listes vides : trois
@@ -44,11 +49,21 @@ async function copy() {
 
 <template>
   <section class="welcome" aria-labelledby="welcome-title">
-    <h2 id="welcome-title">Aucune tuile pour l'instant</h2>
-    <div class="steam">
-      <p>Vos jeux Steam installés peuvent être ajoutés automatiquement.</p>
-      <button type="button" class="primary" @click="$emit('importSteam')">Importer mes jeux Steam</button>
+    <h2 id="welcome-title">Bienvenue ! Par quoi commencer ?</h2>
+    <div class="choices">
+      <button type="button" class="choice primary" @click="$emit('detect')">
+        <strong>Détecter mes applications</strong>
+        <span>Le lanceur cherche les applications du menu Démarrer et vos jeux Steam. Vous cochez celles à garder.</span>
+      </button>
+      <button type="button" class="choice" :aria-expanded="manual" @click="manual = true">
+        <strong>Partir de zéro</strong>
+        <span>Ajoutez vos tuiles une à une, ou éditez <code>config.json</code> à la main.</span>
+      </button>
     </div>
+    <p v-if="!manual" class="hint">
+      Vous pourrez détecter les applications plus tard : clic droit sur l'icône du lanceur, dans la zone de notification.
+    </p>
+    <template v-else>
     <div class="steam">
       <p>Un programme, un raccourci ou un site : ajoutez-le depuis la fenêtre.</p>
       <button type="button" class="primary" @click="$emit('addTile')">Ajouter une tuile</button>
@@ -71,6 +86,7 @@ async function copy() {
       Enregistrez : les tuiles apparaissent aussitôt, sans redémarrer.
       Pour un jeu Steam, l'<code>appId</code> est le nombre dans l'adresse de sa page du magasin.
     </p>
+    </template>
   </section>
 </template>
 
@@ -100,6 +116,13 @@ code { font: 12px var(--font-mono); color: var(--fg); }
 .steam p { margin: 0; color: var(--fg); }
 .steam button { flex: none; }
 .actions { display: flex; gap: 8px; margin: 0 0 10px; }
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 4px 0 12px; }
+.choice {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 12px 14px; text-align: left; background: var(--win);
+}
+.choice strong { font-size: 14px; font-weight: 600; }
+.choice span { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
 button {
   font: inherit; font-size: 13px; color: var(--fg); cursor: pointer;
   background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; padding: 5px 12px;

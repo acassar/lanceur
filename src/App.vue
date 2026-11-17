@@ -4,6 +4,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from "vue";
 import CategoryRail from "./components/CategoryRail.vue";
 import ConfigError from "./components/ConfigError.vue";
+import DetectApps from "./components/DetectApps.vue";
 import HotkeyWarning from "./components/HotkeyWarning.vue";
 import LaunchToast from "./components/LaunchToast.vue";
 import SearchBar from "./components/SearchBar.vue";
@@ -87,7 +88,9 @@ onMounted(async () => {
   keep(await ipc.onConfigChanged(() => load()));
   // Menu de l'icône de notification : « Importer les jeux Steam… ».
   // Ignoré si l'éditeur de tuiles est ouvert (une seule fenêtre à la fois).
-  keep(await ipc.onSteamImportRequested(() => (steamImportOpen.value = !editor.value)));
+  keep(await ipc.onSteamImportRequested(() => (steamImportOpen.value = !editor.value && !detectOpen.value)));
+  // « Détecter les applications… » : de même.
+  keep(await ipc.onDetectAppsRequested(() => (detectOpen.value = !editor.value && !steamImportOpen.value)));
   const stop = await ipc.onWindowShown(() => {
     L.query.value = "";
     L.rail.value = "all";
@@ -149,17 +152,29 @@ function onSteamImported(result: SteamImportResult) {
   if (result.added.length > 0) load();
 }
 
+// Fenêtre « Détecter les applications » (écran d'accueil ou menu de l'icône de notification).
+const detectOpen = ref(false);
+function closeDetect() {
+  detectOpen.value = false;
+  nextTick(() => searchBar.value?.focus());
+}
+function onDetectImported(message: string, added: boolean) {
+  closeDetect();
+  showToast({ message });
+  if (added) load();
+}
+
 // Éditeur de tuiles : `tile` absent pour une nouvelle tuile. La clé force un
 // nouveau formulaire à chaque ouverture.
 const editor = ref<{ key: number; tile?: Tile; category?: string } | null>(null);
 let editorKey = 0;
 function addTile() {
-  if (steamImportOpen.value) return;
+  if (steamImportOpen.value || detectOpen.value) return;
   // Nouvelle tuile rangée par défaut dans la catégorie affichée.
   editor.value = { key: ++editorKey, category: L.rail.value };
 }
 function editTile(tile: Tile) {
-  if (steamImportOpen.value) return;
+  if (steamImportOpen.value || detectOpen.value) return;
   editor.value = { key: ++editorKey, tile };
 }
 function closeEditor() {
@@ -313,7 +328,7 @@ onMounted(load);
           v-if="L.config.value && L.config.value.tiles.length === 0"
           @open-folder="openConfigFolder"
           @copy-failed="showToast({ message: 'Impossible de copier l’exemple', error: true })"
-          @import-steam="steamImportOpen = true"
+          @detect="detectOpen = true"
           @add-tile="addTile"
         />
         <p v-else-if="L.config.value && L.sections.value.length === 0" class="empty">
@@ -352,6 +367,7 @@ onMounted(load);
       @saved="onTileSaved"
       @deleted="onTileDeleted"
     />
+    <DetectApps v-if="detectOpen" :config="L.config.value" @close="closeDetect" @imported="onDetectImported" @partial="load" />
     <SteamImport v-if="steamImportOpen" :config="L.config.value" @close="closeSteamImport" @imported="onSteamImported" />
     <LaunchToast :message="toast?.message ?? null" :detail="toast?.detail" :error="toast?.error" />
   </div>
