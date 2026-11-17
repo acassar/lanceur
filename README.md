@@ -17,7 +17,7 @@ Pour essayer une version de développement : onglet **Actions** → dernier run 
 
 | Touche | Effet |
 |---|---|
-| `Win+Alt+Espace` | afficher / masquer la fenêtre, de n'importe où (réglable : `hotkey`) |
+| `Win+Alt+Espace` | afficher / masquer la fenêtre, de n'importe où (réglable dans les paramètres, ou `Win` seule) |
 | taper du texte | rechercher (nom, début de mot, initiales : « bg3 » trouve *Baldur's Gate 3*) |
 | `Entrée` | lancer la tuile sélectionnée |
 | flèches | se déplacer dans la grille |
@@ -25,6 +25,7 @@ Pour essayer une version de développement : onglet **Actions** → dernier run 
 | `Ctrl+D` (ou l'étoile) | ajouter / retirer des favoris |
 | `Ctrl+N` | ajouter une tuile |
 | `Ctrl+E` ou `F2` (ou clic droit, ou le crayon) | modifier ou supprimer la tuile |
+| `Ctrl+,` | paramètres |
 | `Échap` | vider la recherche, puis masquer la fenêtre |
 
 « Masquer » réduit la fenêtre : l'icône reste dans la barre des tâches, un clic la rouvre. Relancer l'exe réaffiche la fenêtre existante au lieu d'en ouvrir une deuxième.
@@ -34,9 +35,15 @@ Pour essayer une version de développement : onglet **Actions** → dernier run 
 Le lanceur a aussi une icône dans la zone de notification (à droite de la barre des tâches, éventuellement sous la flèche `^`) :
 
 - clic gauche : afficher la fenêtre, ou la masquer si elle est devant ;
-- clic droit : *Afficher le lanceur*, *Détecter les applications…*, *Importer les jeux Steam…*, *Ouvrir le dossier de config*, *Quitter*.
+- clic droit : *Afficher le lanceur*, *Détecter les applications…*, *Importer les jeux Steam…*, *Paramètres…*, *Ouvrir le dossier de config*, *Quitter*.
 
 La croix de la fenêtre la masque au lieu de fermer l'app (le raccourci doit rester actif) : pour quitter, passez par *Quitter* dans ce menu.
+
+### Paramètres
+
+*⚙ Paramètres* (en bas du rail), `Ctrl+,` ou le menu de l'icône de notification ouvre l'écran des réglages : raccourci global, réduction de la fenêtre (après un lancement, en cliquant ailleurs), lancement au démarrage de Windows, nombre de récents, navigateur des apps web et couleur d'accent. Comme pour les tuiles, seules les valeurs modifiées changent dans `config.json`.
+
+Pour le raccourci, cliquez sur le champ puis appuyez sur la combinaison voulue (`Échap` annule la saisie). Ou choisissez **Touche Windows seule** : appuyer puis relâcher `Win` ouvre alors le lanceur *à la place du menu Démarrer* (`"hotkey": "Super"` dans le fichier). Les raccourcis Windows (`Win+E`, `Win+D`, `Win+Maj+S`…) marchent comme avant ; le menu Démarrer reste accessible avec `Ctrl+Échap` ou le bouton Démarrer. Seule exception : quand une fenêtre lancée en administrateur est au premier plan, Windows ne transmet pas ses touches et `Win` y ouvre le menu Démarrer.
 
 ### Ajouter, modifier, supprimer une tuile
 
@@ -99,7 +106,7 @@ VS Code propose alors les champs, affiche leur description au survol et souligne
 
 | Réglage | Défaut | Rôle |
 |---|---|---|
-| `hotkey` | `"Super+Alt+Space"` | raccourci global ; au moins un modificateur (`Ctrl`, `Alt`, `Shift`, `Super`) + une touche (`Space`, `A`…`Z`, `0`…`9`, `F1`…`F24`) |
+| `hotkey` | `"Super+Alt+Space"` | raccourci global ; au moins un modificateur (`Ctrl`, `Alt`, `Shift`, `Super`) + une touche (`Space`, `A`…`Z`, `0`…`9`, `F1`…`F24`), ou `"Super"` seul : la touche Windows, à la place du menu Démarrer |
 | `hideAfterLaunch` | `true` | réduire la fenêtre après un lancement |
 | `hideOnBlur` | `true` | réduire la fenêtre quand elle perd le focus |
 | `accent` | `"#f0a35e"` | couleur d'accent de l'interface |

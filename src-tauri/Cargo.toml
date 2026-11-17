@@ -62,6 +62,12 @@ windows = { version = "0.62", features = [
   # V2 (détection des applications) : lire la cible d'un raccourci .lnk
   # (IShellLinkW::GetPath, dont la signature utilise WIN32_FIND_DATAW)
   "Win32_Storage_FileSystem",
+  # touche Windows seule comme raccourci (winkey.rs) : hook clavier
+  # (SetWindowsHookExW, GetModuleHandleW, GetCurrentThreadId) et touches
+  # simulées (SendInput)
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }

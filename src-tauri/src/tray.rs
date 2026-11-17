@@ -2,8 +2,8 @@
 //!
 //! - Clic gauche : affiche la fenêtre, ou la masque si elle était devant.
 //! - Clic droit : un menu « Afficher le lanceur », « Détecter les
-//!   applications… », « Importer les jeux Steam… », « Ouvrir le dossier de
-//!   config » et « Quitter ».
+//!   applications… », « Importer les jeux Steam… », « Paramètres… »,
+//!   « Ouvrir le dossier de config » et « Quitter ».
 //!
 //! Avec cette icône, la croix de la fenêtre ne quitte plus l'app : elle la
 //! masque, comme Échap (voir `window::on_window_event`). On quitte par le menu.
@@ -25,6 +25,7 @@ const SHOW: &str = "show";
 const OPEN_CONFIG: &str = "open-config";
 const IMPORT_STEAM: &str = "import-steam";
 const DETECT_APPS: &str = "detect-apps";
+const SETTINGS: &str = "settings";
 
 /// Événement envoyé au front pour qu'il ouvre la fenêtre d'import Steam
 /// (`STEAM_IMPORT_EVENT` dans src/lib/ipc.ts).
@@ -32,6 +33,9 @@ pub const STEAM_IMPORT_EVENT: &str = "steam-import-requested";
 /// Événement envoyé au front pour qu'il ouvre la détection des applications
 /// (`DETECT_APPS_EVENT` dans src/lib/ipc.ts).
 pub const DETECT_APPS_EVENT: &str = "detect-apps-requested";
+/// Événement envoyé au front pour qu'il ouvre l'écran de paramètres
+/// (`SETTINGS_EVENT` dans src/lib/ipc.ts).
+pub const SETTINGS_EVENT: &str = "settings-requested";
 const QUIT: &str = "quit";
 
 /// Crée l'icône. Appelée une fois, dans le `setup` de `lib.rs`.
@@ -58,6 +62,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
                 true,
                 None::<&str>,
             )?,
+            &MenuItem::with_id(app, SETTINGS, "Paramètres…", true, None::<&str>)?,
             &MenuItem::with_id(
                 app,
                 OPEN_CONFIG,
@@ -108,6 +113,10 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
         DETECT_APPS => {
             window::show(app);
             let _ = app.emit(DETECT_APPS_EVENT, ());
+        }
+        SETTINGS => {
+            window::show(app);
+            let _ = app.emit(SETTINGS_EVENT, ());
         }
         OPEN_CONFIG => {
             if let Err(e) = crate::open_config_dir(app) {

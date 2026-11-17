@@ -28,9 +28,10 @@
         "hotkey": {
           "type": "string",
           "default": "Super+Alt+Space",
-          "description": "Raccourci global qui affiche ou masque la fenêtre. Au moins un modificateur (Ctrl, Alt, Shift, Super) suivi d'une touche : Space, A à Z, 0 à 9, F1 à F24…",
+          "description": "Raccourci global qui affiche ou masque la fenêtre. Au moins un modificateur (Ctrl, Alt, Shift, Super) suivi d'une touche : Space, A à Z, 0 à 9, F1 à F24… Ou \"Super\" seul : la touche Windows appuyée puis relâchée seule (remplace alors le menu Démarrer, qui reste accessible par Ctrl+Échap).",
           "examples": [
             "Super+Alt+Space",
+            "Super",
             "Alt+Shift+Space",
             "Ctrl+Alt+Shift+Space",
             "Ctrl+Shift+L",

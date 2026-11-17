@@ -3,7 +3,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { SAMPLE, createMockIpc } from "./ipc.mock";
-import type { AppsImportResult, Config, DetectedApp, SteamGame, SteamImportResult, Tile, TileDraft } from "./types";
+import type { AppsImportResult, Config, DetectedApp, Settings, SteamGame, SteamImportResult, Tile, TileDraft } from "./types";
 
 export interface Ipc {
   getConfig(): Promise<Config>;
@@ -63,6 +63,12 @@ export interface Ipc {
   /** Raccourci global configuré, et pourquoi il n'a pas pu être enregistré le cas échéant. */
   getHotkeyStatus(): Promise<HotkeyStatus>;
   /**
+   * Écrit dans config.json les réglages modifiés (et eux seuls), puis les
+   * applique aussitôt. Renvoie l'état du raccourci après coup (déjà pris par
+   * une autre app…). Rejeté sans rien écrire si une valeur est invalide.
+   */
+  updateSettings(changes: Partial<Settings>): Promise<HotkeyStatus>;
+  /**
    * Appelle `callback` chaque fois que la fenêtre réapparaît (raccourci global,
    * exe relancé). Renvoie une fonction qui arrête l'écoute.
    */
@@ -79,6 +85,8 @@ export interface Ipc {
   onSteamImportRequested(callback: () => void): Promise<() => void>;
   /** Idem pour l'entrée « Détecter les applications… ». */
   onDetectAppsRequested(callback: () => void): Promise<() => void>;
+  /** Idem pour l'entrée « Paramètres… ». */
+  onSettingsRequested(callback: () => void): Promise<() => void>;
   /** Ouvre le dossier de config.json dans l'Explorateur. */
   openConfigFolder(): Promise<void>;
 }
@@ -94,6 +102,9 @@ export const STEAM_IMPORT_EVENT = "steam-import-requested";
 
 /** Événement émis par le menu de l'icône de notification (`DETECT_APPS_EVENT` dans tray.rs). */
 export const DETECT_APPS_EVENT = "detect-apps-requested";
+
+/** Événement émis par le menu de l'icône de notification (`SETTINGS_EVENT` dans tray.rs). */
+export const SETTINGS_EVENT = "settings-requested";
 
 /** Miroir de `HotkeyStatus` dans window.rs. */
 export interface HotkeyStatus {
@@ -142,10 +153,12 @@ function createTauriIpc(): Ipc {
     getIcon: (id) => invoke<string | null>("get_icon", { id }),
     hideWindow: () => invoke("hide_window"),
     getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
+    updateSettings: (changes) => invoke<HotkeyStatus>("update_settings", { changes }),
     onWindowShown: (callback) => listen(WINDOW_SHOWN_EVENT, () => callback()),
     onConfigChanged: (callback) => listen(CONFIG_CHANGED_EVENT, () => callback()),
     onSteamImportRequested: (callback) => listen(STEAM_IMPORT_EVENT, () => callback()),
     onDetectAppsRequested: (callback) => listen(DETECT_APPS_EVENT, () => callback()),
+    onSettingsRequested: (callback) => listen(SETTINGS_EVENT, () => callback()),
     openConfigFolder: () => invoke("open_config_folder"),
   };
 }

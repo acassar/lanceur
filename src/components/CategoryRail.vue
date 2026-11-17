@@ -5,7 +5,7 @@ import type { RailItem, RailKey } from "../composables/useLauncher";
 import { move } from "../lib/reorder";
 
 const props = defineProps<{ items: RailItem[]; tileCount: number; reorderable: boolean }>();
-const emit = defineEmits<{ addTile: []; reorder: [ids: string[]] }>();
+const emit = defineEmits<{ addTile: []; settings: []; reorder: [ids: string[]] }>();
 // (même précaution que TileSection : liste figée au début du glisser)
 let snapshot: string[] = [];
 
@@ -47,6 +47,7 @@ const active = defineModel<RailKey>({ required: true });
       {{ item.label }}<span>{{ item.count }}</span>
     </button>
     <button type="button" tabindex="-1" class="add" title="Ajouter une tuile (Ctrl+N)" @click="$emit('addTile')">+ Ajouter une tuile</button>
+    <button type="button" tabindex="-1" class="tool" title="Paramètres (Ctrl+,)" @click="$emit('settings')">⚙ Paramètres</button>
     <div class="foot">config.json<br />{{ tileCount }} tuiles</div>
   </nav>
 </template>
@@ -71,6 +72,7 @@ button.dragging { position: relative; z-index: 2; pointer-events: none; backgrou
 button.drop-before, button[aria-current="true"].drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 button.drop-after, button[aria-current="true"].drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .add { margin-top: auto; color: var(--faint); }
-.add:hover { color: var(--accent); }
+.add:hover, .tool:hover { color: var(--accent); }
+.tool { color: var(--faint); }
 .foot { padding: 8px 10px 0; font-size: 11px; color: var(--faint); line-height: 1.5; }
 </style>
