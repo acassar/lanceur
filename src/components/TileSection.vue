@@ -13,12 +13,18 @@ const props = defineProps<{
   /** Les tuiles peuvent être réordonnées par glisser-déposer. */
   reorderable: boolean;
 }>();
-const emit = defineEmits<{ launch: [index: number]; hover: [index: number]; toggleFavorite: [id: string]; edit: [tile: Tile]; reorder: [ids: string[]] }>();
+const emit = defineEmits<{ launch: [index: number]; hover: [index: number]; toggleFavorite: [id: string]; edit: [tile: Tile]; reorder: [ids: string[], moved: string] }>();
 
+/** Ids de la section au début du glisser : la config peut être rechargée entre-temps. */
+let snapshot: string[] = [];
 const drag = useDragReorder({
   axis: "x",
-  onDrop: (from, to) => emit("reorder", move(props.section.items, from, to).map((i) => i.tile.id)),
+  onDrop: (from, to) => emit("reorder", move(snapshot, from, to), snapshot[from]),
 });
+function startDrag(e: PointerEvent, i: number) {
+  snapshot = props.section.items.map((item) => item.tile.id);
+  drag.start(e, i);
+}
 </script>
 
 <template>
@@ -35,7 +41,7 @@ const drag = useDragReorder({
           'drop-after': drag.target.value?.index === i && drag.target.value.after,
         }"
         :style="drag.dragging.value === i ? { transform: `translate(${drag.offset.value.x}px, ${drag.offset.value.y}px)` } : undefined"
-        @pointerdown="reorderable && drag.start($event, i)"
+        @pointerdown="reorderable && startDrag($event, i)"
         :tile="item.tile"
         :index="item.index"
         :selected="item.index === selected"
@@ -43,7 +49,7 @@ const drag = useDragReorder({
         :compact="section.compact"
         :query="query"
         @launch="emit('launch', item.index)"
-        @hover="emit('hover', item.index)"
+        @hover="drag.dragging.value === null && emit('hover', item.index)"
         @toggle-favorite="emit('toggleFavorite', item.tile.id)"
         @edit="emit('edit', item.tile)"
       />

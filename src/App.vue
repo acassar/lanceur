@@ -192,33 +192,41 @@ const canReorder = computed(() => !!L.config.value && !L.query.value.trim());
 function sectionReorderable(key: string) {
   return canReorder.value && (key === "favorites" || !!L.config.value?.categories.some((c) => c.id === key));
 }
+/** Les enregistrements d'ordre partent l'un après l'autre, dans l'ordre des glisser. */
+let reorderQueue: Promise<void> = Promise.resolve();
 /**
  * Applique tout de suite le nouvel ordre à l'écran, puis l'enregistre. En cas
  * d'échec (fichier modifié à la main entre-temps…), on recharge le fichier.
+ * `keep` : la tuile déplacée, sélectionnée à sa nouvelle place.
  */
-async function reorder(save: () => Promise<void>, apply: () => void) {
-  const before = L.current.value?.id;
+function reorder(save: () => Promise<void>, apply: () => void, keep?: { section: string; id: string }) {
   apply();
-  // La tuile sélectionnée reste sélectionnée à sa nouvelle place.
-  const i = before ? L.flat.value.findIndex((t) => t.id === before) : -1;
-  if (i >= 0) L.selected.value = i;
-  try {
-    await save();
-  } catch (e) {
-    showToast({ message: "Nouvel ordre non enregistré", detail: toIpcError(e).message, error: true });
-    load();
+  if (keep) {
+    const section = L.sections.value.find((s) => s.key === keep.section);
+    const item = section?.items.find((i) => i.tile.id === keep.id);
+    if (item) L.selected.value = item.index;
   }
+  reorderQueue = reorderQueue.then(async () => {
+    try {
+      await save();
+    } catch (e) {
+      showToast({ message: "Nouvel ordre non enregistré", detail: toIpcError(e).message, error: true });
+      await load();
+    }
+  });
 }
-function reorderSection(key: string, ids: string[]) {
+function reorderSection(key: string, ids: string[], moved: string) {
   const cfg = L.config.value;
   if (!cfg) return;
-  if (key === "favorites") reorder(() => ipc.reorderFavorites(ids), () => (cfg.favorites = ids));
-  else reorder(() => ipc.reorderTiles(key, ids), () => applyTileOrder(cfg, key, ids));
+  const keep = { section: key, id: moved };
+  if (key === "favorites") reorder(() => ipc.reorderFavorites(ids), () => (cfg.favorites = ids), keep);
+  else reorder(() => ipc.reorderTiles(key, ids), () => applyTileOrder(cfg, key, ids), keep);
 }
 function reorderCategories(ids: string[]) {
   const cfg = L.config.value;
   if (!cfg) return;
   const byId = new Map(cfg.categories.map((c) => [c.id, c]));
+  if (ids.some((id) => !byId.has(id))) return load();
   reorder(
     () => ipc.reorderCategories(ids),
     () => (cfg.categories = ids.map((id) => byId.get(id)!)),
@@ -327,7 +335,7 @@ onMounted(load);
           @toggle-favorite="toggleFavorite"
           :reorderable="sectionReorderable(section.key)"
           @edit="editTile"
-          @reorder="(ids) => reorderSection(section.key, ids)"
+          @reorder="(ids, moved) => reorderSection(section.key, ids, moved)"
         />
       </div>
     </div>

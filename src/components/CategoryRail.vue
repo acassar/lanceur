@@ -6,6 +6,8 @@ import { move } from "../lib/reorder";
 
 const props = defineProps<{ items: RailItem[]; tileCount: number; reorderable: boolean }>();
 const emit = defineEmits<{ addTile: []; reorder: [ids: string[]] }>();
+// (même précaution que TileSection : liste figée au début du glisser)
+let snapshot: string[] = [];
 
 // Les deux premières entrées (Tout, Favoris) sont fixes : seules les
 // catégories se réordonnent, en glissant verticalement.
@@ -13,8 +15,12 @@ const FIXED = 2;
 const categoryKeys = computed(() => props.items.slice(FIXED).map((i) => i.key));
 const drag = useDragReorder({
   axis: "y",
-  onDrop: (from, to) => emit("reorder", move(categoryKeys.value, from, to)),
+  onDrop: (from, to) => emit("reorder", move(snapshot, from, to)),
 });
+function startDrag(e: PointerEvent, i: number) {
+  snapshot = [...categoryKeys.value];
+  drag.start(e, i);
+}
 const cat = (i: number) => i - FIXED;
 const active = defineModel<RailKey>({ required: true });
 </script>
@@ -32,7 +38,7 @@ const active = defineModel<RailKey>({ required: true });
       }"
       :style="i >= FIXED && drag.dragging.value === cat(i) ? { transform: `translateY(${drag.offset.value.y}px)` } : undefined"
       :title="reorderable && i >= FIXED ? 'Glisser pour réordonner' : undefined"
-      @pointerdown="reorderable && i >= FIXED && drag.start($event, cat(i))"
+      @pointerdown="reorderable && i >= FIXED && startDrag($event, cat(i))"
       type="button"
       tabindex="-1"
       :aria-current="item.key === active ? 'true' : undefined"
@@ -61,9 +67,9 @@ button {
 button span { font: 11px var(--font-mono); color: var(--faint); }
 button:hover { background: var(--surface); color: var(--fg); }
 button[aria-current="true"] { background: var(--surface-2); color: var(--fg); box-shadow: inset 2px 0 0 var(--accent); }
-.dragging { position: relative; z-index: 2; pointer-events: none; background: var(--surface-2); color: var(--fg); box-shadow: 0 6px 18px rgb(0 0 0 / 45%); }
-.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
-.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+button.dragging { position: relative; z-index: 2; pointer-events: none; background: var(--surface-2); color: var(--fg); box-shadow: 0 6px 18px rgb(0 0 0 / 45%); }
+button.drop-before, button[aria-current="true"].drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+button.drop-after, button[aria-current="true"].drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .add { margin-top: auto; color: var(--faint); }
 .add:hover { color: var(--accent); }
 .foot { padding: 8px 10px 0; font-size: 11px; color: var(--faint); line-height: 1.5; }
