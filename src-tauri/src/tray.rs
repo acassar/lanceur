@@ -86,17 +86,20 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
     }
 }
 
-/// Clic sur l'icône elle-même. On réagit au *relâchement* du bouton gauche
-/// (comme un bouton normal). Un double-clic envoie aussi deux clics simples :
-/// `toggle_from_tray` ignore le second, pour ne pas masquer aussitôt la
-/// fenêtre qu'il vient d'afficher.
+/// Clic gauche sur l'icône elle-même. À l'appui, on note si la fenêtre est
+/// devant ; on agit au *relâchement* (comme un bouton normal). Un double-clic
+/// envoie aussi deux clics simples : le second est ignoré, pour ne pas masquer
+/// aussitôt la fenêtre que le premier vient d'afficher (voir window.rs).
 fn on_click(tray: &TrayIcon, event: TrayIconEvent) {
     if let TrayIconEvent::Click {
         button: MouseButton::Left,
-        button_state: MouseButtonState::Up,
+        button_state,
         ..
     } = event
     {
-        window::toggle_from_tray(tray.app_handle());
+        match button_state {
+            MouseButtonState::Down => window::tray_pressed(tray.app_handle()),
+            MouseButtonState::Up => window::tray_released(tray.app_handle()),
+        }
     }
 }

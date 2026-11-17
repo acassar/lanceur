@@ -292,7 +292,7 @@ pub fn run() {
             // tauri.conf.json). Lancement normal : on l'affiche, centrée.
             // Lancement par Windows à l'ouverture de session : elle reste
             // cachée, le raccourci ou l'icône de notification l'ouvriront.
-            if !autostart::launched_at_startup(std::env::args()) {
+            if !autostart::launched_at_startup(std::env::args_os()) {
                 window::show(handle);
             }
             Ok(())

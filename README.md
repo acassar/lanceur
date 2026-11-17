@@ -38,7 +38,7 @@ La croix de la fenêtre la masque au lieu de fermer l'app (le raccourci doit res
 
 ### Lancement au démarrage de Windows
 
-Mettez `"launchAtStartup": true` dans les réglages de `config.json`. Le lanceur s'ajoute alors aux *Applications de démarrage* de Windows (registre de votre compte, sans droits admin) ; à l'ouverture de session, il démarre fenêtre cachée : seule l'icône de notification apparaît, et `Win+Alt+Espace` l'ouvre. Remettez `false` pour le retirer. Le désactiver dans le Gestionnaire des tâches marche aussi, et ce choix est respecté. (En développement, `npm run tauri dev` n'y touche pas.)
+Mettez `"launchAtStartup": true` dans les réglages de `config.json`. Le lanceur s'ajoute alors aux *Applications de démarrage* de Windows (registre de votre compte, sans droits admin) ; à l'ouverture de session, il démarre fenêtre cachée : seule l'icône de notification apparaît, et `Win+Alt+Espace` l'ouvre (ensuite, comme d'habitude, masquer la réduit dans la barre des tâches). Remettez `false` pour le retirer. Le désactiver dans le Gestionnaire des tâches marche aussi, et ce choix est respecté tant que vous ne repassez pas le réglage de `false` à `true`. La désinstallation (installeur `.exe`) retire l'entrée. (En développement, `npm run tauri dev` n'y touche pas.)
 
 ## Configurer
 

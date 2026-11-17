@@ -7,7 +7,7 @@
 //! - le raccourci global (`Win+Alt+Espace` par défaut, réglage `hotkey`) ;
 //! - relancer l'exe (plugin *single-instance*, branché dans `lib.rs`) ;
 //! - cliquer sur l'icône de la barre des tâches (géré par Windows lui-même) ;
-//! - cliquer sur l'icône de la zone de notification (tray.rs, [`toggle_from_tray`]).
+//! - cliquer sur l'icône de la zone de notification (tray.rs, [`tray_released`]).
 //!
 //! Au démarrage de Windows (`--autostart`, voir autostart.rs), la fenêtre n'est
 //! pas affichée du tout : `"visible": false` dans `tauri.conf.json`, et `setup`
@@ -67,11 +67,19 @@ pub struct WindowState {
     /// protège aucune donnée, seulement une portion de code.
     syncing: Mutex<()>,
 
-    /// Dernière perte de focus de la fenêtre (voir [`toggle_from_tray`]).
+    /// Dernière perte de focus de la fenêtre (voir [`tray_released`]).
     last_blur: Mutex<Option<Instant>>,
 
-    /// Dernier clic pris en compte sur l'icône de notification.
-    last_tray_click: Mutex<Option<Instant>>,
+    /// Clics sur l'icône de notification (voir [`tray_pressed`]).
+    tray: Mutex<TrayClick>,
+}
+
+#[derive(Default)]
+struct TrayClick {
+    /// Moment où le bouton a été enfoncé, et si la fenêtre était alors devant.
+    pressed: Option<(Instant, bool)>,
+    /// Dernier clic pris en compte (pour ignorer le 2ᵉ clic d'un double-clic).
+    last_toggle: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -264,42 +272,54 @@ fn is_in_front(window: &WebviewWindow) -> bool {
     }
 }
 
-/// Après une perte de focus, délai pendant lequel la fenêtre compte encore
-/// comme « devant » pour un clic sur l'icône de notification.
+/// Une perte de focus survenue jusqu'à ce délai *avant* l'appui sur l'icône
+/// de notification compte encore comme « la fenêtre était devant ».
 const TRAY_BLUR_GRACE: Duration = Duration::from_millis(600);
 
 /// Un 2ᵉ clic sur l'icône de notification aussi rapproché est ignoré
 /// (double-clic : Windows envoie deux clics simples).
 const TRAY_DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
-/// Clic gauche sur l'icône de notification : masque la fenêtre si elle était
-/// devant, sinon l'affiche.
+/// Bouton gauche enfoncé sur l'icône de notification : on note si la fenêtre
+/// est devant *à cet instant*, avant que le clic ne change le premier plan.
+pub fn tray_pressed(app: &AppHandle) {
+    let in_front = main_window(app).is_some_and(|w| is_in_front(&w));
+    lock(&app.state::<WindowState>().tray).pressed = Some((Instant::now(), in_front));
+}
+
+/// Bouton gauche relâché sur l'icône : masque la fenêtre si elle était devant
+/// au moment du clic, sinon l'affiche.
 ///
-/// Pourquoi ne pas réutiliser [`toggle`] ? Cliquer sur l'icône donne d'abord
-/// le premier plan à la barre des tâches : au moment du clic, notre fenêtre
-/// n'est *déjà plus* devant, et `toggle` la réafficherait au lieu de la masquer.
-/// On regarde donc aussi si elle vient de perdre le focus (il y a moins de
-/// `TRAY_BLUR_GRACE`) : si oui, c'est ce clic qui le lui a pris.
-pub fn toggle_from_tray(app: &AppHandle) {
-    let Some(window) = main_window(app) else {
-        return;
-    };
+/// Pourquoi ne pas réutiliser [`toggle`] ? Appuyer sur l'icône donne le
+/// premier plan à la barre des tâches : au relâchement, notre fenêtre n'est
+/// *déjà plus* devant (avec `hideOnBlur`, elle a même pu être réduite si le
+/// bouton est resté enfoncé plus de 200 ms), et `toggle` la réafficherait.
+/// On considère donc qu'elle « était devant » si :
+/// - elle l'était à l'appui ([`tray_pressed`]) ;
+/// - ou elle a perdu le focus peu avant l'appui, ou pendant : la perte de focus
+///   signalée par la WebView2 arrive en différé, parfois après l'appui.
+pub fn tray_released(app: &AppHandle) {
     let state = app.state::<WindowState>();
-    {
-        let mut last = lock(&state.last_tray_click);
+    let was_in_front = {
+        let mut tray = lock(&state.tray);
+        // `take()` vide `pressed` et rend son ancienne valeur.
+        let pressed = tray.pressed.take();
         // `is_some_and` : vrai seulement s'il y a une date *et* qu'elle est récente.
-        if last.is_some_and(|t| t.elapsed() < TRAY_DOUBLE_CLICK) {
+        if tray
+            .last_toggle
+            .is_some_and(|t| t.elapsed() < TRAY_DOUBLE_CLICK)
+        {
             return;
         }
-        *last = Some(Instant::now());
-    }
-    let open = window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(true);
-    let just_left = lock(&state.last_blur).is_some_and(|t| t.elapsed() < TRAY_BLUR_GRACE);
-    if open && (just_left || is_in_front(&window)) {
-        hide(app)
-    } else {
-        show(app)
-    }
+        tray.last_toggle = Some(Instant::now());
+        // Pas d'appui noté (ne devrait pas arriver) : on prend l'instant présent.
+        let (pressed_at, in_front) = pressed.unwrap_or((Instant::now(), false));
+        let since = pressed_at
+            .checked_sub(TRAY_BLUR_GRACE)
+            .unwrap_or(pressed_at);
+        in_front || lock(&state.last_blur).is_some_and(|t| t >= since)
+    };
+    if was_in_front { hide(app) } else { show(app) }
 }
 
 /// Affiche la fenêtre au centre de l'écran où se trouve la souris, lui donne
