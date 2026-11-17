@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createMockIpc } from "./ipc.mock";
-import { importMessage, toChoices } from "./steam";
+import { importMessage, targetCategory, toChoices } from "./steam";
 
 describe("toChoices", () => {
   it("marque les jeux qui ont déjà une tuile", async () => {
@@ -15,6 +15,16 @@ describe("toChoices", () => {
     );
     expect(choices.map((c) => c.inConfig)).toEqual([true, false]);
     expect(toChoices([{ appId: 1, name: "X" }], null)[0].inConfig).toBe(false);
+  });
+});
+
+describe("targetCategory", () => {
+  it("suit la règle de Rust", async () => {
+    const config = await createMockIpc().getConfig();
+    expect(targetCategory(null)).toBe("Jeux");
+    expect(targetCategory({ ...config, categories: [{ id: "jeux", name: "Mes jeux" }] })).toBe("Mes jeux");
+    expect(targetCategory({ ...config, categories: [{ id: "g", name: " Games " }] })).toBe(" Games ");
+    expect(targetCategory({ ...config, categories: [{ id: "o", name: "Outils" }] })).toBe("Jeux");
   });
 });
 

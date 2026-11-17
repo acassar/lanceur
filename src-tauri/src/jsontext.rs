@@ -105,7 +105,16 @@ pub fn append_to_array(text: &str, key: &str, items: &[String]) -> Option<String
                     let last_start = offset(text, last.get());
                     let last_end = last_start + last.get().len();
                     let sep = if raw.get().contains('\n') {
-                        format!(",{nl}{}", indent_at(text, last_start))
+                        // Retrait du dernier élément s'il commence sa ligne,
+                        // sinon (`[{` sur la ligne de la clé) un cran de plus que la clé.
+                        let own_line = text[line_start(text, last_start)..last_start]
+                            .trim()
+                            .is_empty();
+                        let indent = match own_line {
+                            true => indent_at(text, last_start),
+                            false => one_more(&indent_at(text, start)),
+                        };
+                        format!(",{nl}{indent}")
                     } else {
                         ", ".to_string()
                     };
@@ -179,6 +188,13 @@ mod tests {
             new,
             "{\n\t\"version\": 1,\n\t\"tiles\": [\n\t\t{ \"a\": 1 },\n\t\t{ \"b\": 2 }\n\t]\n}"
         );
+    }
+
+    #[test]
+    fn element_qui_commence_sur_la_ligne_du_crochet() {
+        let text = "{\n  \"version\": 1,\n  \"tiles\": [{\n    \"a\": 1\n  }]\n}";
+        let new = append_to_array(text, "tiles", &items(&["{ \"b\": 2 }"])).unwrap();
+        assert!(new.contains("  },\n    { \"b\": 2 }]"), "{new}");
     }
 
     #[test]

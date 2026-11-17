@@ -13,6 +13,19 @@ export function toChoices(games: SteamGame[], config: Config | null): SteamChoic
   return games.map((g) => ({ ...g, inConfig: known.has(g.appId) }));
 }
 
+/**
+ * Nom de la catégorie où l'import rangera les jeux : même règle que `plan`
+ * dans steam.rs (id `jeux`, sinon une catégorie nommée « Jeux » ou « Games »,
+ * sinon une nouvelle catégorie « Jeux »).
+ */
+export function targetCategory(config: Config | null): string {
+  const categories = config?.categories ?? [];
+  const found =
+    categories.find((c) => c.id === "jeux") ??
+    categories.find((c) => ["jeux", "games"].includes(c.name.trim().toLowerCase()));
+  return found?.name ?? "Jeux";
+}
+
 /** « 1 jeu », « 3 jeux ». */
 export function games(n: number): string {
   return `${n} jeu${n > 1 ? "x" : ""}`;

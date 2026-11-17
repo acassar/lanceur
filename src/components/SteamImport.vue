@@ -10,7 +10,7 @@
 // catégorie…), et ses clics ne sont pas renvoyés vers la recherche.
 import { computed, nextTick, onMounted, ref } from "vue";
 import { ipc, toIpcError } from "../lib/ipc";
-import { games, toChoices, type SteamChoice } from "../lib/steam";
+import { games, targetCategory, toChoices, type SteamChoice } from "../lib/steam";
 import type { Config, SteamGame, SteamImportResult } from "../lib/types";
 
 const props = defineProps<{ config: Config | null }>();
@@ -46,6 +46,12 @@ async function detect() {
   }
 }
 
+// Pendant l'écriture, on ne ferme pas : l'import continuerait côté Rust, mais
+// la fenêtre fermée ne pourrait plus annoncer son résultat.
+function close() {
+  if (!busy.value) emit("close");
+}
+
 function toggle(appId: number) {
   const next = new Set(checked.value);
   if (!next.delete(appId)) next.add(appId);
@@ -79,7 +85,7 @@ onMounted(() => {
 <template>
   <Teleport to="body">
   <!-- `cancel` : Échap. On ferme par le parent (v-if) plutôt que par le navigateur. -->
-  <dialog ref="dialog" class="steam-import" aria-labelledby="steam-import-title" @cancel.prevent="emit('close')">
+  <dialog ref="dialog" class="steam-import" aria-labelledby="steam-import-title" @cancel.prevent="close">
     <h2 id="steam-import-title">Importer les jeux Steam</h2>
 
     <p v-if="!choices && !error" class="info">Recherche des jeux installés…</p>
@@ -87,7 +93,7 @@ onMounted(() => {
     <template v-else-if="choices">
       <p class="info">
         {{ games(choices.length) }} installé{{ choices.length > 1 ? "s" : "" }}.
-        Les jeux cochés sont ajoutés à <code>config.json</code>, dans la catégorie « Jeux ».
+        Les jeux cochés sont ajoutés à <code>config.json</code>, dans la catégorie « {{ targetCategory(config) }} ».
       </p>
       <ul class="list">
         <li v-for="c in choices" :key="c.appId">
@@ -112,7 +118,7 @@ onMounted(() => {
         {{ allChecked ? "Tout décocher" : "Tout cocher" }}
       </button>
       <span class="spacer" />
-      <button type="button" @click="emit('close')">{{ choices && fresh.length === 0 ? "Fermer" : "Annuler" }}</button>
+      <button type="button" :disabled="busy" @click="close">{{ choices && fresh.length === 0 ? "Fermer" : "Annuler" }}</button>
       <button v-if="error && !choices" type="button" class="primary" @click="detect">Réessayer</button>
       <button v-else-if="fresh.length > 0" ref="submitButton" type="button" class="primary" :disabled="busy || count === 0" @click="submit">
         {{ busy ? "Ajout…" : `Ajouter ${games(count)}` }}

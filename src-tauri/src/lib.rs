@@ -191,7 +191,9 @@ async fn import_steam_games(
         steam::import(&dir, &chosen)
     })
     .await
-    .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
+    // Le thread a paniqué (détection ou import) : l'écriture, qui vient en
+    // dernier et est atomique, n'a pas eu lieu.
+    .unwrap_or_else(|e| Err(AppError::Steam(format!("import interrompu ({e})"))))
 }
 
 /// Commande `get_icon` : `invoke("get_icon", { id: "discord" })`.

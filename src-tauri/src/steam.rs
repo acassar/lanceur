@@ -108,7 +108,8 @@ pub fn installed_games(steam_dir: &Path) -> Vec<SteamGame> {
         }
     }
     // Tri sans tenir compte des majuscules ; `to_lowercase` gère les accents.
-    games.sort_by_key(|g| g.name.to_lowercase());
+    // `cached` : la version en minuscules est calculée une fois par jeu.
+    games.sort_by_cached_key(|g| g.name.to_lowercase());
     games
 }
 

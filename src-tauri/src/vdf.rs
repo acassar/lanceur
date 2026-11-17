@@ -160,8 +160,13 @@ fn read_quoted(chars: &mut Peekable<Chars>) -> Option<String> {
             '\\' => match chars.next()? {
                 'n' => text.push('\n'),
                 't' => text.push('\t'),
-                // `\\` -> `\`, `\"` -> `"` ; tout autre caractère est gardé tel quel.
-                c => text.push(c),
+                c @ ('\\' | '"') => text.push(c),
+                // Antislash seul (`D:\SteamLibrary` écrit par un vieil outil) :
+                // on le garde, sinon le chemin deviendrait `D:SteamLibrary`.
+                c => {
+                    text.push('\\');
+                    text.push(c);
+                }
             },
             c => text.push(c),
         }
@@ -209,6 +214,8 @@ mod tests {
         assert_eq!(a.get("b").unwrap().as_str(), Some("1"));
         assert_eq!(a.get("c").unwrap().as_str(), Some("2"));
         assert_eq!(a.get("q").unwrap().as_str(), Some(r#"dit "oui""#));
+        let root = parse(r#""path" "D:\SteamLibrary""#).unwrap();
+        assert_eq!(root.get("path").unwrap().as_str(), Some(r"D:\SteamLibrary"));
     }
 
     #[test]
