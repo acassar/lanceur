@@ -27,6 +27,19 @@ Pour essayer une version de développement : onglet **Actions** → dernier run 
 
 « Masquer » réduit la fenêtre : l'icône reste dans la barre des tâches, un clic la rouvre. Relancer l'exe réaffiche la fenêtre existante au lieu d'en ouvrir une deuxième.
 
+### Icône de notification
+
+Le lanceur a aussi une icône dans la zone de notification (à droite de la barre des tâches, éventuellement sous la flèche `^`) :
+
+- clic gauche : afficher la fenêtre, ou la masquer si elle est devant ;
+- clic droit : *Afficher le lanceur*, *Ouvrir le dossier de config*, *Quitter*.
+
+La croix de la fenêtre la masque au lieu de fermer l'app (le raccourci doit rester actif) : pour quitter, passez par *Quitter* dans ce menu.
+
+### Lancement au démarrage de Windows
+
+Mettez `"launchAtStartup": true` dans les réglages de `config.json`. Le lanceur s'ajoute alors aux *Applications de démarrage* de Windows (registre de votre compte, sans droits admin) ; à l'ouverture de session, il démarre fenêtre cachée : seule l'icône de notification apparaît, et `Win+Alt+Espace` l'ouvre. Remettez `false` pour le retirer. Le désactiver dans le Gestionnaire des tâches marche aussi, et ce choix est respecté. (En développement, `npm run tauri dev` n'y touche pas.)
+
 ## Configurer
 
 Toute la configuration est dans un fichier JSON lisible :
@@ -63,6 +76,7 @@ VS Code propose alors les champs, affiche leur description au survol et souligne
 | `accent` | `"#f0a35e"` | couleur d'accent de l'interface |
 | `browser` | `"msedge"` | navigateur des apps web : `msedge`, `chrome`, `brave` ou chemin complet d'un navigateur Chromium |
 | `recentsCount` | `4` | nombre de tuiles dans « Récents » (`0` pour masquer la section) |
+| `launchAtStartup` | `false` | lancer l'app à l'ouverture de session Windows, fenêtre cachée (voir « Icône de notification ») |
 
 ### Tuiles
 
@@ -99,7 +113,7 @@ Dans le même dossier que `config.json` :
 ## Limites connues (v0.1.0)
 
 - L'installeur n'est pas signé (avertissement SmartScreen à l'installation).
-- Pas d'éditeur de tuiles dans l'interface, pas d'import automatique de la bibliothèque Steam, pas d'icône dans la zone de notification ni de lancement au démarrage de Windows : ce sont les pistes V2 du [plan](PLAN.md#8-hors-périmètre-v1-pistes-v2).
+- Pas d'éditeur de tuiles dans l'interface, pas d'import automatique de la bibliothèque Steam : ce sont les pistes V2 du [plan](PLAN.md#8-hors-périmètre-v1-pistes-v2).
 - Si `config.json` est un lien symbolique, ses modifications ne sont pas détectées tout de suite : elles s'appliquent au prochain affichage de la fenêtre.
 
 ## Développer

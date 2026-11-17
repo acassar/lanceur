@@ -9,6 +9,7 @@ export interface Settings {
   accent: string;
   browser: string;
   recentsCount: number;
+  launchAtStartup: boolean;
 }
 
 export interface Category {

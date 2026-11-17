@@ -91,6 +91,8 @@ pub struct Settings {
     /// `msedge`, `chrome`, `brave` ou chemin complet vers le navigateur.
     pub browser: String,
     pub recents_count: u32,
+    /// Lancer l'app à l'ouverture de session Windows (autostart.rs).
+    pub launch_at_startup: bool,
 }
 
 /// `Default` est un *trait* (≈ une interface) : on dit comment construire
@@ -106,6 +108,7 @@ impl Default for Settings {
             accent: "#f0a35e".to_string(),
             browser: "msedge".to_string(),
             recents_count: 4,
+            launch_at_startup: false,
         }
     }
 }

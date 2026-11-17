@@ -15,6 +15,7 @@ export const SAMPLE: Config = {
     accent: "#f0a35e",
     browser: "msedge",
     recentsCount: 4,
+    launchAtStartup: false,
   },
   categories: [
     { id: "jeux", name: "Jeux" },

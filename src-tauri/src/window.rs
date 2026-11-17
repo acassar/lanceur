@@ -6,7 +6,12 @@
 //! Trois façons de faire réapparaître la fenêtre, qui passent toutes par [`show`] :
 //! - le raccourci global (`Win+Alt+Espace` par défaut, réglage `hotkey`) ;
 //! - relancer l'exe (plugin *single-instance*, branché dans `lib.rs`) ;
-//! - cliquer sur l'icône de la barre des tâches (géré par Windows lui-même).
+//! - cliquer sur l'icône de la barre des tâches (géré par Windows lui-même) ;
+//! - cliquer sur l'icône de la zone de notification (tray.rs, [`toggle_from_tray`]).
+//!
+//! Au démarrage de Windows (`--autostart`, voir autostart.rs), la fenêtre n'est
+//! pas affichée du tout : `"visible": false` dans `tauri.conf.json`, et `setup`
+//! ne l'affiche que pour un lancement normal.
 //!
 //! Notions Rust abordées : les plugins, l'état partagé `State<…>` avec un
 //! `Mutex` et un `AtomicBool`, et les closures passées aux plugins.
@@ -14,7 +19,7 @@
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
@@ -61,6 +66,12 @@ pub struct WindowState {
     /// même temps ne doivent pas enregistrer deux raccourcis. `Mutex<()>` ne
     /// protège aucune donnée, seulement une portion de code.
     syncing: Mutex<()>,
+
+    /// Dernière perte de focus de la fenêtre (voir [`toggle_from_tray`]).
+    last_blur: Mutex<Option<Instant>>,
+
+    /// Dernier clic pris en compte sur l'icône de notification.
+    last_tray_click: Mutex<Option<Instant>>,
 }
 
 #[derive(Default)]
@@ -253,6 +264,44 @@ fn is_in_front(window: &WebviewWindow) -> bool {
     }
 }
 
+/// Après une perte de focus, délai pendant lequel la fenêtre compte encore
+/// comme « devant » pour un clic sur l'icône de notification.
+const TRAY_BLUR_GRACE: Duration = Duration::from_millis(600);
+
+/// Un 2ᵉ clic sur l'icône de notification aussi rapproché est ignoré
+/// (double-clic : Windows envoie deux clics simples).
+const TRAY_DOUBLE_CLICK: Duration = Duration::from_millis(500);
+
+/// Clic gauche sur l'icône de notification : masque la fenêtre si elle était
+/// devant, sinon l'affiche.
+///
+/// Pourquoi ne pas réutiliser [`toggle`] ? Cliquer sur l'icône donne d'abord
+/// le premier plan à la barre des tâches : au moment du clic, notre fenêtre
+/// n'est *déjà plus* devant, et `toggle` la réafficherait au lieu de la masquer.
+/// On regarde donc aussi si elle vient de perdre le focus (il y a moins de
+/// `TRAY_BLUR_GRACE`) : si oui, c'est ce clic qui le lui a pris.
+pub fn toggle_from_tray(app: &AppHandle) {
+    let Some(window) = main_window(app) else {
+        return;
+    };
+    let state = app.state::<WindowState>();
+    {
+        let mut last = lock(&state.last_tray_click);
+        // `is_some_and` : vrai seulement s'il y a une date *et* qu'elle est récente.
+        if last.is_some_and(|t| t.elapsed() < TRAY_DOUBLE_CLICK) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    let open = window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(true);
+    let just_left = lock(&state.last_blur).is_some_and(|t| t.elapsed() < TRAY_BLUR_GRACE);
+    if open && (just_left || is_in_front(&window)) {
+        hide(app)
+    } else {
+        show(app)
+    }
+}
+
 /// Affiche la fenêtre au centre de l'écran où se trouve la souris, lui donne
 /// le focus, puis prévient le front (qui vide la recherche et y met le focus).
 pub fn show(app: &AppHandle) {
@@ -295,9 +344,19 @@ const BLUR_DELAY: Duration = Duration::from_millis(200);
 /// - Perte de focus + `hideOnBlur` : on réduit la fenêtre, après vérification.
 /// - Retour de la fenêtre (clic sur l'icône de la barre des tâches) : on
 ///   redonne le focus à la recherche.
+/// - Croix de la fenêtre : si l'icône de notification existe, on masque la
+///   fenêtre au lieu de quitter (on quitte par le menu de l'icône).
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     match event {
+        tauri::WindowEvent::CloseRequested { api, .. }
+            if crate::tray::exists(window.app_handle()) =>
+        {
+            // `prevent_close` annule la fermeture demandée par la croix.
+            api.prevent_close();
+            hide(window.app_handle());
+        }
         tauri::WindowEvent::Focused(false) => {
+            *lock(&window.state::<WindowState>().last_blur) = Some(Instant::now());
             if window
                 .state::<WindowState>()
                 .hide_on_blur
