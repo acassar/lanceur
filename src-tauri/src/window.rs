@@ -78,6 +78,13 @@ pub struct WindowState {
     /// Un compteur plutôt qu'un booléen : si deux boîtes se chevauchent, la
     /// fermeture de la première ne réactive pas `hideOnBlur` trop tôt.
     native_dialogs: AtomicUsize,
+
+    /// La fenêtre a été réduite (taille 0×0) depuis le dernier
+    /// redimensionnement : le prochain sera une restauration.
+    was_minimized: AtomicBool,
+
+    /// Dernière réapparition de la fenêtre ([`show`] ou restauration).
+    last_shown: Mutex<Option<Instant>>,
 }
 
 /// Signale l'ouverture (`true`) ou la fermeture (`false`) d'une boîte de
@@ -269,6 +276,21 @@ pub fn toggle(app: &AppHandle) {
 /// fenêtre est bien devant. On demande donc directement à Windows quelle est
 /// la fenêtre au premier plan (`GetForegroundWindow`) et on compare.
 fn is_in_front(window: &WebviewWindow) -> bool {
+    foreground_is(window, false)
+}
+
+/// Comme [`is_in_front`], mais une fenêtre *possédée* par la nôtre (liste
+/// déroulante d'un `<select>`, boîte « Ouvrir »…) compte aussi comme « nous ».
+///
+/// Réservé à `hideOnBlur` : quand une telle fenêtre passe au premier plan,
+/// la perte de focus est normale et il ne faut pas réduire. Le raccourci et
+/// l'icône de notification, eux, utilisent [`is_in_front`] : boîte « Ouvrir »
+/// devant, un appui doit ramener la fenêtre, pas la réduire sous la boîte.
+fn is_in_front_or_owned(window: &WebviewWindow) -> bool {
+    foreground_is(window, true)
+}
+
+fn foreground_is(window: &WebviewWindow, include_owned: bool) -> bool {
     if !window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(true) {
         return false;
     }
@@ -276,16 +298,31 @@ fn is_in_front(window: &WebviewWindow) -> bool {
     // systèmes (dev sous Linux), c'est le bloc `#[cfg(not(windows))]` qui compte.
     #[cfg(windows)]
     {
-        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GA_ROOTOWNER, GetAncestor, GetForegroundWindow,
+        };
         // `unsafe` : appel direct à l'API Win32, que le compilateur Rust ne peut
-        // pas vérifier. Cette fonction-là ne fait que lire, sans risque.
+        // pas vérifier. Ces fonctions-là ne font que lire, sans risque.
         let foreground = unsafe { GetForegroundWindow() };
+        if foreground.0.is_null() {
+            return false;
+        }
+        // Propriétaire tout en haut de la chaîne (la fenêtre elle-même si
+        // personne ne la possède).
+        let root = if include_owned {
+            unsafe { GetAncestor(foreground, GA_ROOTOWNER) }
+        } else {
+            foreground
+        };
         // `is_ok_and(…)` : vrai seulement si `hwnd()` réussit *et* que la
         // condition est remplie ; si `hwnd()` échoue, on répond « pas devant ».
-        window.hwnd().is_ok_and(|hwnd| hwnd.0 == foreground.0)
+        window
+            .hwnd()
+            .is_ok_and(|hwnd| hwnd.0 == foreground.0 || hwnd.0 == root.0)
     }
     #[cfg(not(windows))]
     {
+        let _ = include_owned;
         window.is_focused().unwrap_or(false)
     }
 }
@@ -353,8 +390,20 @@ pub fn show(app: &AppHandle) {
     center_on_active_monitor(app, &window);
     let _ = window.set_focus();
     focus_webview(&window);
+    mark_shown(app);
     let _ = window.emit(SHOWN_EVENT, ());
 }
+
+/// Note l'instant où la fenêtre vient de réapparaître (voir [`RESTORE_WINDOW`]).
+fn mark_shown(app: &AppHandle) {
+    *lock(&app.state::<WindowState>().last_shown) = Some(Instant::now());
+}
+
+/// Juste après une réapparition, une perte de focus « fausse alerte » est
+/// souvent un effet de la restauration : la page a perdu le clavier en
+/// route, on le lui rend. Au-delà de ce délai, on n'y touche plus (voir
+/// [`hide_after_blur`]).
+const RESTORE_WINDOW: Duration = Duration::from_millis(1500);
 
 /// Donne le focus clavier à la page (la WebView) en plus de la fenêtre.
 ///
@@ -403,11 +452,27 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
                 hide_after_blur(window.app_handle().clone());
             }
         }
-        // Une restauration change la taille (de 0×0 à la vraie taille).
-        tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
-            if let Some(main) = main_window(window.app_handle())
+        // Une réduction donne une taille de 0×0 : on la note.
+        tauri::WindowEvent::Resized(size) if size.width == 0 || size.height == 0 => {
+            window
+                .state::<WindowState>()
+                .was_minimized
+                .store(true, Ordering::Relaxed);
+        }
+        // Une restauration change la taille (de 0×0 à la vraie taille). On ne
+        // rend le focus à la page que dans ce cas-là, pas à chaque
+        // redimensionnement, pour ne jamais le voler sans raison.
+        tauri::WindowEvent::Resized(_) => {
+            let state = window.state::<WindowState>();
+            if state.was_minimized.load(Ordering::Relaxed)
+                && let Some(main) = main_window(window.app_handle())
                 && is_in_front(&main)
             {
+                // Le drapeau n'est effacé qu'une fois le focus rendu : si la
+                // fenêtre n'est pas encore devant, le prochain redimensionnement
+                // réessaiera.
+                state.was_minimized.store(false, Ordering::Relaxed);
+                mark_shown(window.app_handle());
                 focus_webview(&main);
             }
         }
@@ -453,14 +518,26 @@ fn hide_after_blur(app: AppHandle) {
             if !enabled || dialog || minimized {
                 return;
             }
-            if is_in_front(&window) {
-                // Fausse alerte : la fenêtre est toujours devant, mais la page a
-                // pu perdre le clavier. On le lui rend, sinon la frappe n'arrive
-                // plus dans la recherche, et un vrai départ vers une autre app ne
-                // serait plus signalé (donc plus de réduction automatique).
-                focus_webview(&window);
-            } else {
+            if !is_in_front_or_owned(&window) {
                 let _ = window.minimize();
+                return;
+            }
+            // Fausse alerte : la fenêtre est toujours devant.
+            //
+            // Juste après une réapparition, la page a pu perdre le clavier en
+            // route : on le lui rend, sinon la frappe n'arrive plus dans la
+            // recherche, et un vrai départ vers une autre app ne serait plus
+            // signalé (donc plus de réduction automatique).
+            //
+            // Le reste du temps, on n'y touche *pas* : la perte de focus vient
+            // alors de la page elle-même (liste déroulante d'un `<select>`).
+            // Reprendre le focus refermait la liste aussitôt, et le front
+            // remettait le clavier dans la recherche : la fenêtre
+            // « scintillait » et les listes étaient inutilisables.
+            let just_shown = lock(&handle.state::<WindowState>().last_shown)
+                .is_some_and(|t| t.elapsed() < RESTORE_WINDOW);
+            if just_shown {
+                focus_webview(&window);
             }
         });
     });
