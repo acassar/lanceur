@@ -197,6 +197,32 @@ pub fn remove_element(text: &str, key: &str, index: usize) -> Option<String> {
     Some(format!("{}{}", &text[..cut_start], &text[cut_end..]))
 }
 
+/// Réordonne les éléments du tableau `key` : la place n°`i` reçoit l'élément
+/// qui était n°`order[i]`. Les séparateurs (virgules, sauts de ligne, lignes
+/// vides, retraits) restent à leur place ; seuls les éléments changent de case.
+/// `order` doit être une permutation de `0..n`, sinon `None`.
+pub fn permute_elements(text: &str, key: &str, order: &[usize]) -> Option<String> {
+    let spans = element_spans(text, key)?;
+    let mut seen = vec![false; spans.len()];
+    if order.len() != spans.len()
+        || order
+            .iter()
+            .any(|&i| i >= spans.len() || std::mem::replace(&mut seen[i], true))
+    {
+        return None;
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0; // tout ce qui précède `copied` est déjà dans `out`
+    for (slot, &(start, end)) in spans.iter().enumerate() {
+        let (src_start, src_end) = spans[order[slot]];
+        out.push_str(&text[copied..start]);
+        out.push_str(&text[src_start..src_end]);
+        copied = end;
+    }
+    out.push_str(&text[copied..]);
+    Some(out)
+}
+
 /// Un nouveau tableau contenant `items`, pour la clé située sur la ligne de `pos`.
 fn new_array(text: &str, pos: usize, items: &[String], nl: &str, multiline: bool) -> String {
     if !multiline {
@@ -320,5 +346,20 @@ mod tests {
             "{\n  \"version\": 1,\n  \"tiles\": [],\n  \"x\": []\n}"
         );
         assert_eq!(remove_element(one, "tiles", 1), None);
+    }
+
+    #[test]
+    fn permute_les_elements_sans_toucher_aux_separateurs() {
+        let text =
+            "{\n  \"version\": 1,\n  \"tiles\": [\n    { \"a\": 1 },\n\n    \"b\",\n    3\n  ]\n}";
+        let new = permute_elements(text, "tiles", &[2, 0, 1]).unwrap();
+        assert_eq!(
+            new,
+            "{\n  \"version\": 1,\n  \"tiles\": [\n    3,\n\n    { \"a\": 1 },\n    \"b\"\n  ]\n}"
+        );
+        assert_eq!(permute_elements(text, "tiles", &[0, 1, 2]).unwrap(), text);
+        assert_eq!(permute_elements(text, "tiles", &[0, 0, 1]), None);
+        assert_eq!(permute_elements(text, "tiles", &[0, 1]), None);
+        assert_eq!(permute_elements(text, "tiles", &[0, 1, 3]), None);
     }
 }

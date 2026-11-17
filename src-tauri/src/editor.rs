@@ -162,6 +162,123 @@ pub fn delete_tile(dir: &Path, id: &str) -> Result<(), AppError> {
 }
 
 // ---------------------------------------------------------------------------
+// Réordonner (glisser-déposer)
+// ---------------------------------------------------------------------------
+//
+// Le front envoie la liste *complète* dans le nouvel ordre (toutes les tuiles
+// d'une catégorie, toutes les catégories, tous les favoris). Si elle ne
+// correspond plus au fichier (modifié à la main entre-temps), on refuse : le
+// front recharge et l'utilisateur recommence, plutôt que de deviner.
+
+/// Réordonne les tuiles de `category`. Seules les cases du tableau `"tiles"`
+/// occupées par cette catégorie changent de contenu : les tuiles des autres
+/// catégories, et tous les séparateurs, restent où ils sont.
+pub fn reorder_tiles(dir: &Path, category: &str, ids: &[String]) -> Result<(), AppError> {
+    let _guard = config::write_lock();
+    let path = dir.join(config::FILE_NAME);
+    let text = config::read_or_create_text(dir)?;
+    let config = config::parse(&text, &path)?;
+
+    // Places (index dans `tiles`) des tuiles de la catégorie, dans l'ordre actuel.
+    let slots: Vec<usize> = (0..config.tiles.len())
+        .filter(|&i| config.tiles[i].category == category)
+        .collect();
+    let current: Vec<&str> = slots.iter().map(|&i| config.tiles[i].id.as_str()).collect();
+    let wanted = permutation(&current, ids)?;
+
+    // `order[place] = ancienne place de l'élément qui y va` : identité, sauf
+    // pour les places de la catégorie.
+    let mut order: Vec<usize> = (0..config.tiles.len()).collect();
+    for (k, &slot) in slots.iter().enumerate() {
+        order[slot] = slots[wanted[k]];
+    }
+    rewrite_order(&path, &text, &config, "tiles", &order, |expected| {
+        expected.tiles = order.iter().map(|&i| config.tiles[i].clone()).collect();
+    })
+}
+
+/// Réordonne les catégories (l'ordre du rail et des sections).
+pub fn reorder_categories(dir: &Path, ids: &[String]) -> Result<(), AppError> {
+    let _guard = config::write_lock();
+    let path = dir.join(config::FILE_NAME);
+    let text = config::read_or_create_text(dir)?;
+    let config = config::parse(&text, &path)?;
+
+    let current: Vec<&str> = config.categories.iter().map(|c| c.id.as_str()).collect();
+    let order = permutation(&current, ids)?;
+    rewrite_order(&path, &text, &config, "categories", &order, |expected| {
+        expected.categories = order
+            .iter()
+            .map(|&i| config.categories[i].clone())
+            .collect();
+    })
+}
+
+/// Réordonne les favoris (section Favoris).
+pub fn reorder_favorites(dir: &Path, ids: &[String]) -> Result<(), AppError> {
+    let _guard = config::write_lock();
+    let path = dir.join(config::FILE_NAME);
+    let text = config::read_or_create_text(dir)?;
+    let config = config::parse(&text, &path)?;
+
+    let current: Vec<&str> = config.favorites.iter().map(String::as_str).collect();
+    permutation(&current, ids)?;
+    if config.favorites == ids {
+        return Ok(());
+    }
+    let mut expected = config.clone();
+    expected.favorites = ids.to_vec();
+    let new_text = favorites::set_favorites(&text, ids).ok_or_else(|| not_found("favorites"))?;
+    write_checked(&path, &new_text, &expected)
+}
+
+/// Pour chaque position de `wanted`, l'index du même id dans `current`.
+/// Erreur si `wanted` n'est pas exactement `current` dans un autre ordre.
+fn permutation(current: &[&str], wanted: &[String]) -> Result<Vec<usize>, AppError> {
+    let stale = || {
+        AppError::ConfigWrite(
+            "config.json a changé entre-temps : la fenêtre a été rechargée, recommencez".into(),
+        )
+    };
+    if current.len() != wanted.len() {
+        return Err(stale());
+    }
+    let mut used = vec![false; current.len()];
+    wanted
+        .iter()
+        .map(|id| {
+            let i = current.iter().position(|c| c == id).ok_or_else(stale)?;
+            // `std::mem::replace` : marque l'index comme pris et renvoie
+            // l'ancienne valeur (déjà pris = id en double).
+            if std::mem::replace(&mut used[i], true) {
+                return Err(stale());
+            }
+            Ok(i)
+        })
+        .collect()
+}
+
+/// Applique `order` au tableau `key` dans le texte, vérifie et écrit.
+/// `change` décrit la même modification sur la config attendue.
+fn rewrite_order(
+    path: &Path,
+    text: &str,
+    config: &Config,
+    key: &str,
+    order: &[usize],
+    change: impl FnOnce(&mut Config),
+) -> Result<(), AppError> {
+    // Ordre inchangé (tuile lâchée à sa place) : rien à écrire.
+    if order.iter().enumerate().all(|(i, &o)| i == o) {
+        return Ok(());
+    }
+    let mut expected = config.clone();
+    change(&mut expected);
+    let new_text = jsontext::permute_elements(text, key, order).ok_or_else(|| not_found(key))?;
+    write_checked(path, &new_text, &expected)
+}
+
+// ---------------------------------------------------------------------------
 // Outils
 // ---------------------------------------------------------------------------
 
@@ -575,5 +692,61 @@ mod tests {
         assert_eq!(saved.tiles.last().unwrap(), &added[0]);
         assert_eq!(added[0].name, "Le \"jeu\" \\ 2");
         assert_eq!(added[0].id, "le-jeu-2");
+    }
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn reordonne_une_categorie_sans_toucher_aux_autres() {
+        let (dir, path) = setup(EXAMPLE);
+        // Outils : steam, discord, vscode → vscode, steam, discord.
+        reorder_tiles(dir.path(), "outils", &ids(&["vscode", "steam", "discord"])).unwrap();
+        let saved = load(dir.path());
+        let outils: Vec<&str> = saved
+            .tiles
+            .iter()
+            .filter(|t| t.category == "outils")
+            .map(|t| t.id.as_str())
+            .collect();
+        assert_eq!(outils, ["vscode", "steam", "discord"]);
+        let original = config::parse(EXAMPLE, &path).unwrap();
+        let others = |c: &Config| -> Vec<String> {
+            c.tiles
+                .iter()
+                .filter(|t| t.category != "outils")
+                .map(|t| t.id.clone())
+                .collect()
+        };
+        assert_eq!(others(&saved), others(&original));
+        // Même texte, mêmes lignes : seul l'ordre des lignes d'outils a changé.
+        let text = fs::read_to_string(&path).unwrap();
+        assert_eq!(text.len(), EXAMPLE.len());
+
+        // Liste incomplète ou périmée : refusée, rien n'est écrit.
+        assert!(reorder_tiles(dir.path(), "outils", &ids(&["vscode", "steam"])).is_err());
+        assert!(reorder_tiles(dir.path(), "outils", &ids(&["vscode", "steam", "steam"])).is_err());
+        assert!(reorder_tiles(dir.path(), "outils", &ids(&["vscode", "steam", "cs2"])).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn reordonne_categories_et_favoris() {
+        let (dir, path) = setup(EXAMPLE);
+        reorder_categories(dir.path(), &ids(&["web", "jeux", "outils"])).unwrap();
+        reorder_favorites(dir.path(), &ids(&["instagram", "cs2", "discord"])).unwrap();
+        let saved = load(dir.path());
+        let cats: Vec<&str> = saved.categories.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(cats, ["web", "jeux", "outils"]);
+        assert_eq!(saved.favorites, ["instagram", "cs2", "discord"]);
+        assert!(reorder_categories(dir.path(), &ids(&["web", "jeux"])).is_err());
+        assert!(reorder_favorites(dir.path(), &ids(&["bg3", "cs2", "discord"])).is_err());
+
+        // Même ordre : le fichier n'est pas réécrit.
+        let before = fs::metadata(&path).unwrap().modified().unwrap();
+        reorder_categories(dir.path(), &ids(&["web", "jeux", "outils"])).unwrap();
+        reorder_tiles(dir.path(), "jeux", &ids(&["cs2", "bg3"])).unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before);
     }
 }
