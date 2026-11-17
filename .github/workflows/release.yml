@@ -1,0 +1,91 @@
+# Crée une Release GitHub brouillon avec les installeurs Windows.
+# Deux façons de la lancer :
+# - Onglet Actions → « release » → Run workflow (branche main) : prend la version de main
+#   (package.json), crée le tag v<version> sur ce commit, puis compile. Rien à faire en local.
+# - Pousser soi-même un tag v* (ex. v0.3.0) : vérifie que le tag correspond à la version, puis compile.
+# Un tag poussé par ce workflow (avec GITHUB_TOKEN) ne relance pas de workflow : pas de double build.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write # créer le tag et la Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Déterminer et vérifier la version
+        id: version
+        shell: bash
+        run: |
+          npm_version=$(node -p "require('./package.json').version")
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+          echo "package.json=$npm_version Cargo.toml=$cargo_version"
+          if [ "$npm_version" != "$cargo_version" ]; then
+            echo "::error::package.json ($npm_version) et Cargo.toml ($cargo_version) n'ont pas la même version. Lancer npm run bump -- X.Y.Z."
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            if [ "${GITHUB_REF_NAME#v}" != "$npm_version" ]; then
+              echo "::error::Le tag $GITHUB_REF_NAME ne correspond pas à la version de l'app ($npm_version)."
+              exit 1
+            fi
+          else
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+              echo "::error::Lancer la release depuis la branche main (choisie : $GITHUB_REF_NAME)."
+              exit 1
+            fi
+            # Tag déjà là : relance d'une release ratée sur le même commit (on le réutilise),
+            # sinon la version n'a pas été montée depuis la dernière release.
+            existing=$(git ls-remote --tags origin "refs/tags/v$npm_version" | cut -f1)
+            if [ -n "$existing" ] && [ "$existing" != "$GITHUB_SHA" ]; then
+              echo "::error::Le tag v$npm_version existe déjà sur un autre commit. Monter la version (npm run bump -- X.Y.Z, PR, merge) avant de relancer."
+              exit 1
+            fi
+            if [ -z "$existing" ]; then echo "create=true" >> "$GITHUB_OUTPUT"; fi
+          fi
+          echo "tag=v$npm_version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - run: npm ci
+      - run: npm test --if-present
+
+      # Le tag n'est posé qu'une fois les tests passés, pour ne pas laisser de tag orphelin.
+      - name: Créer le tag
+        if: steps.version.outputs.create == 'true'
+        shell: bash
+        run: |
+          git tag "${{ steps.version.outputs.tag }}" "$GITHUB_SHA"
+          git push origin "refs/tags/${{ steps.version.outputs.tag }}"
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ steps.version.outputs.tag }}
+          releaseName: 'Lanceur ${{ steps.version.outputs.tag }}'
+          releaseDraft: true
+
+      - run: cargo test --manifest-path src-tauri/Cargo.toml

@@ -31,4 +31,4 @@ edit('src-tauri/Cargo.lock', (s) =>
   s.replace(/(name = "lanceur"\r?\nversion = ")[^"]*"/, `$1${version}"`),
 );
 
-console.log(`\nEnsuite : PR + merge sur main, puis git tag v${version} && git push origin v${version}`);
+console.log(`\nEnsuite : PR + merge sur main, puis onglet Actions → release → Run workflow (crée le tag v${version}).`);

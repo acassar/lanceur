@@ -160,10 +160,12 @@ La CI (GitHub Actions, runner Windows) compile et teste chaque push sur `main` e
 ### Publier une version
 
 1. `npm run bump -- 0.3.0` met cette version dans `package.json`, `package-lock.json`, `src-tauri/Cargo.toml` et `src-tauri/Cargo.lock`. Commiter, puis merger sur `main`.
-2. Une fois `main` à jour : `git pull`, puis `git tag v0.3.0 && git push origin v0.3.0` (le tag doit être exactement `v` + la version).
-3. Le job `release` vérifie que le tag correspond aux versions, compile et crée une Release **brouillon** avec les installeurs. Il reste à la publier depuis l'onglet *Releases*.
+2. Onglet **Actions** du repo → workflow **release** → **Run workflow** (branche `main`) → **Run workflow**.
+3. Le workflow vérifie les versions, lance les tests, crée le tag `v0.3.0` sur le dernier commit de `main`, compile et crée une Release **brouillon** avec les installeurs. Il reste à la publier depuis l'onglet *Releases*.
 
-Si le job `release` échoue sur « Le tag ne correspond pas aux versions », le tag a été posé sur un commit dont la version est différente. Supprimer le tag (`git push origin :refs/tags/vX.Y.Z` et `git tag -d vX.Y.Z`), corriger la version, puis le reposer sur le bon commit.
+Si le tag de cette version existe déjà sur un autre commit, le workflow s'arrête : monter la version (étape 1) puis relancer. Si une release échoue pendant la compilation, il suffit de relancer *Run workflow* : le tag déjà posé sur ce commit est réutilisé.
+
+Alternative en ligne de commande : `git tag v0.3.0 && git push origin v0.3.0` (le tag doit être exactement `v` + la version) lance le même workflow, sans créer de tag.
 
 ## Organisation
 
