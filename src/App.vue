@@ -9,6 +9,7 @@ import LaunchToast from "./components/LaunchToast.vue";
 import SearchBar from "./components/SearchBar.vue";
 import StatusBar from "./components/StatusBar.vue";
 import TileSection from "./components/TileSection.vue";
+import WelcomeScreen from "./components/WelcomeScreen.vue";
 import { useKeyboardNav, type Direction } from "./composables/useKeyboardNav";
 import { useLauncher } from "./composables/useLauncher";
 import { ipc, toIpcError } from "./lib/ipc";
@@ -52,6 +53,9 @@ watch(L.rail, () => searchBar.value?.focus(false));
 function keepSearchFocus(e: MouseEvent) {
   const el = e.target as HTMLElement;
   if (el === searchBar.value?.input) return;
+  // Texte qu'on peut vouloir sélectionner pour le copier (exemple de l'écran
+  // d'accueil, message d'erreur) : on laisse faire la sélection.
+  if (el.closest(".selectable")) return;
   // Clic sur la barre de défilement de la grille : on laisse faire le glisser.
   if (el === scroller.value && e.offsetX >= el.clientWidth) return;
   e.preventDefault();
@@ -185,7 +189,12 @@ onMounted(load);
           @retry="load"
           @open-folder="openConfigFolder"
         />
-        <p v-if="L.config.value && L.sections.value.length === 0" class="empty">
+        <WelcomeScreen
+          v-if="L.config.value && L.config.value.tiles.length === 0"
+          @open-folder="openConfigFolder"
+          @copy-failed="showToast({ message: 'Impossible de copier l’exemple', error: true })"
+        />
+        <p v-else-if="L.config.value && L.sections.value.length === 0" class="empty">
           <template v-if="L.query.value.trim()">Aucune tuile pour <strong>« {{ L.query.value.trim() }} »</strong>.</template>
           <template v-else-if="L.rail.value === 'favorites'">Aucun favori pour l'instant. Sélectionnez une tuile et appuyez sur <kbd>Ctrl</kbd> <kbd>D</kbd>.</template>
           <template v-else>Cette catégorie est vide.</template>

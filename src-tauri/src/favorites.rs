@@ -309,7 +309,9 @@ mod tests {
     fn ajoute_puis_retire_et_persiste() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(config::FILE_NAME);
-        // Pas de fichier : la config d'exemple est créée.
+        // On part de la config d'exemple (celle créée au premier démarrage
+        // n'a aucune tuile).
+        fs::write(&path, EXAMPLE).unwrap();
         assert_eq!(
             set(dir.path(), "bg3", true).unwrap(),
             ["cs2", "discord", "instagram", "bg3"]

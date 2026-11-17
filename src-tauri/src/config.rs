@@ -1,8 +1,9 @@
 //! Lecture de `config.json`.
 //!
 //! Le fichier vit dans `%APPDATA%\io.github.acassar.lanceur\config.json`.
-//! S'il n'existe pas, on le crée à partir de `config.example.json` (embarqué
-//! dans l'exe à la compilation). S'il est invalide, on renvoie une erreur
+//! S'il n'existe pas, on le crée à partir de `config.default.json` (embarqué
+//! dans l'exe à la compilation) : réglages par défaut, mais aucune tuile,
+//! l'app affiche alors un écran d'accueil qui explique comment en ajouter. S'il est invalide, on renvoie une erreur
 //! en français (ligne, colonne, message, tuile concernée) que le front affiche.
 //!
 //! Les structs ci-dessous produisent le même JSON que les types TypeScript de
@@ -23,12 +24,12 @@ use crate::error::AppError;
 /// Nom du fichier de configuration dans le dossier de l'app.
 pub const FILE_NAME: &str = "config.json";
 
-/// Config d'exemple écrite au premier démarrage.
+/// Config écrite au premier démarrage : réglages par défaut, aucune tuile.
 ///
 /// `include_str!` lit le fichier *à la compilation* et colle son contenu dans
 /// l'exe sous forme de `&'static str` (une chaîne qui vit aussi longtemps que
 /// le programme). Aucun fichier à installer à côté de l'exe.
-const EXAMPLE: &str = include_str!("../config.example.json");
+const DEFAULT: &str = include_str!("../config.default.json");
 
 /// Seule version du format reconnue pour l'instant.
 const SUPPORTED_VERSION: u32 = 1;
@@ -160,7 +161,7 @@ pub enum Target {
 // Lecture du fichier
 // ---------------------------------------------------------------------------
 
-/// Lit `config.json` dans `dir`, ou le crée à partir de l'exemple s'il n'existe pas.
+/// Lit `config.json` dans `dir`, ou le crée (vide de tuiles) s'il n'existe pas.
 ///
 /// `dir: &Path` : on *emprunte* le chemin (lecture seule), l'appelant le garde.
 /// Le `Result<Config, AppError>` dit au compilateur (et au lecteur) que la
@@ -174,10 +175,10 @@ pub fn load_or_create(dir: &Path) -> Result<Config, AppError> {
         // Lu avec succès : `text` devient propriétaire de la chaîne lue.
         Ok(text) => text,
         // Le fichier n'existe pas encore : premier démarrage. On écrit
-        // l'exemple puis on le relit (au cas où une autre instance de l'app
+        // la config de départ puis on la relit (au cas où une autre instance de l'app
         // l'aurait créé en même temps, c'est sa version qui compte).
         Err(e) if e.kind() == ErrorKind::NotFound => {
-            write_example(dir, &path)?;
+            write_default(dir, &path)?;
             read(&path)?
         }
         Err(source) => return Err(read_error(path, source)),
@@ -538,8 +539,8 @@ fn validate(config: &Config) -> Vec<String> {
     problems
 }
 
-/// Crée le dossier de l'app et y écrit la config d'exemple.
-fn write_example(dir: &Path, path: &Path) -> Result<(), AppError> {
+/// Crée le dossier de l'app et y écrit la config de départ.
+fn write_default(dir: &Path, path: &Path) -> Result<(), AppError> {
     fs::create_dir_all(dir).map_err(|source| create_error(dir, source))?;
     // `create_new(true)` : échoue si le fichier existe déjà, pour ne jamais
     // écraser une config de l'utilisateur.
@@ -555,8 +556,15 @@ fn write_example(dir: &Path, path: &Path) -> Result<(), AppError> {
     };
     // `|source| …` est une *closure* : une fonction anonyme, comme une fonction
     // fléchée JS. Elle *emprunte* `path` (lecture seule) pour construire l'erreur.
-    file.write_all(EXAMPLE.as_bytes())
-        .map_err(|source| create_error(path, source))?;
+    if let Err(source) = file.write_all(DEFAULT.as_bytes()) {
+        // Écriture interrompue (disque plein…) : on supprime le fichier à
+        // moitié écrit, sinon il ne serait jamais recréé (`create_new`
+        // tomberait sur `AlreadyExists`). `drop` ferme le fichier avant, ce
+        // que Windows exige pour le supprimer ; `let _ =` ignore un échec ici.
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(create_error(path, source));
+    }
     Ok(()) // `()` : « rien », l'équivalent de `void`
 }
 
@@ -585,6 +593,10 @@ pub fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
 mod tests {
     use super::*;
 
+    /// Config d'exemple de la documentation (une tuile de chaque type). Elle
+    /// n'est plus écrite au premier démarrage, mais doit rester valide.
+    const EXAMPLE: &str = include_str!("../config.example.json");
+
     fn p() -> PathBuf {
         PathBuf::from("config.json")
     }
@@ -599,6 +611,17 @@ mod tests {
         let config = parse(EXAMPLE, &p()).expect("config.example.json doit être valide");
         assert_eq!(config.version, 1);
         assert!(!config.tiles.is_empty());
+    }
+
+    #[test]
+    fn la_config_de_depart_est_valide_et_sans_tuiles() {
+        let config = parse(DEFAULT, &p()).expect("config.default.json doit être valide");
+        assert!(config.categories.is_empty());
+        assert!(config.favorites.is_empty());
+        assert!(config.tiles.is_empty());
+        // Les réglages écrits dans le fichier sont ceux par défaut : le fichier
+        // les montre à l'utilisateur sans rien changer au comportement.
+        assert_eq!(config.settings, Settings::default());
     }
 
     #[test]
@@ -711,8 +734,8 @@ mod tests {
 
         let config = load_or_create(&dir).unwrap();
         let path = dir.join(FILE_NAME);
-        assert_eq!(fs::read_to_string(&path).unwrap(), EXAMPLE);
-        assert_eq!(config, parse(EXAMPLE, &path).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), DEFAULT);
+        assert_eq!(config, parse(DEFAULT, &path).unwrap());
 
         // L'utilisateur modifie le fichier : on lit sa version, pas l'exemple.
         fs::write(&path, r#"{ "version": 1 }"#).unwrap();
@@ -781,11 +804,13 @@ mod tests {
         .map(String::from)
         .into();
         assert_eq!(keys(&schema), top);
-        // La config d'exemple pointe vers le schéma.
-        assert_eq!(
-            parse(EXAMPLE, &p()).unwrap().schema.as_deref(),
-            schema["$id"].as_str()
-        );
+        // Les configs de départ et d'exemple pointent vers le schéma.
+        for text in [DEFAULT, EXAMPLE] {
+            assert_eq!(
+                parse(text, &p()).unwrap().schema.as_deref(),
+                schema["$id"].as_str()
+            );
+        }
     }
 
     #[test]
