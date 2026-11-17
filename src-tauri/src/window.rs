@@ -18,7 +18,7 @@
 
 use std::str::FromStr;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -73,17 +73,23 @@ pub struct WindowState {
     /// Clics sur l'icône de notification (voir [`tray_pressed`]).
     tray: Mutex<TrayClick>,
 
-    /// Une boîte de dialogue Windows (« Ouvrir ») est ouverte au-dessus de la
-    /// fenêtre : la perte de focus est alors normale, on ne réduit pas.
-    native_dialog: AtomicBool,
+    /// Nombre de boîtes de dialogue Windows (« Ouvrir ») ouvertes au-dessus de
+    /// la fenêtre : la perte de focus est alors normale, on ne réduit pas.
+    /// Un compteur plutôt qu'un booléen : si deux boîtes se chevauchent, la
+    /// fermeture de la première ne réactive pas `hideOnBlur` trop tôt.
+    native_dialogs: AtomicUsize,
 }
 
 /// Signale l'ouverture (`true`) ou la fermeture (`false`) d'une boîte de
 /// dialogue Windows, pendant laquelle `hideOnBlur` est suspendu.
 pub fn set_native_dialog_open(app: &AppHandle, open: bool) {
-    app.state::<WindowState>()
-        .native_dialog
-        .store(open, Ordering::Relaxed);
+    let count = &app.state::<WindowState>().native_dialogs;
+    if open {
+        count.fetch_add(1, Ordering::Relaxed);
+    } else {
+        // `fetch_update` : décrémente sans jamais passer sous zéro.
+        let _ = count.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
+    }
 }
 
 #[derive(Default)]
@@ -440,8 +446,9 @@ fn hide_after_blur(app: AppHandle) {
                 .load(Ordering::Relaxed);
             let dialog = handle
                 .state::<WindowState>()
-                .native_dialog
-                .load(Ordering::Relaxed);
+                .native_dialogs
+                .load(Ordering::Relaxed)
+                > 0;
             let minimized = window.is_minimized().unwrap_or(true);
             if !enabled || dialog || minimized {
                 return;

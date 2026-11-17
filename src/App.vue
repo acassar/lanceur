@@ -85,7 +85,8 @@ onMounted(async () => {
   // et laisse la dernière config valide à l'écran.
   keep(await ipc.onConfigChanged(() => load()));
   // Menu de l'icône de notification : « Importer les jeux Steam… ».
-  keep(await ipc.onSteamImportRequested(() => (steamImportOpen.value = true)));
+  // Ignoré si l'éditeur de tuiles est ouvert (une seule fenêtre à la fois).
+  keep(await ipc.onSteamImportRequested(() => (steamImportOpen.value = !editor.value)));
   const stop = await ipc.onWindowShown(() => {
     L.query.value = "";
     L.rail.value = "all";
@@ -152,10 +153,12 @@ function onSteamImported(result: SteamImportResult) {
 const editor = ref<{ key: number; tile?: Tile; category?: string } | null>(null);
 let editorKey = 0;
 function addTile() {
+  if (steamImportOpen.value) return;
   // Nouvelle tuile rangée par défaut dans la catégorie affichée.
   editor.value = { key: ++editorKey, category: L.rail.value };
 }
 function editTile(tile: Tile) {
+  if (steamImportOpen.value) return;
   editor.value = { key: ++editorKey, tile };
 }
 function closeEditor() {

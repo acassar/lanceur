@@ -101,7 +101,8 @@ export function unquote(path: string): string {
 /** Ajoute `https://` à une adresse tapée sans (« youtube.com »). */
 export function normalizeUrl(text: string): string {
   const url = text.trim();
-  if (!url || /^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+  // `localhost:3000` n'a pas de schéma : seul `xxx://` en est un.
+  if (!url || /^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
   return `https://${url}`;
 }
 
@@ -117,9 +118,10 @@ export function parseAppId(text: string): number | null {
 }
 
 /**
- * Découpe une ligne d'arguments comme une invite de commandes : les espaces
- * séparent, les guillemets regroupent (`--title "Mon jeu"` → 2 arguments),
- * `\"` donne un guillemet.
+ * Découpe une ligne d'arguments avec les règles de Windows
+ * (CommandLineToArgvW) : les espaces séparent, les guillemets regroupent
+ * (`--title "Mon jeu"` → 2 arguments), `\"` donne un guillemet, et des `\`
+ * suivis d'un guillemet sont dédoublés (`"C:\dir\\"` → `C:\dir\`).
  */
 export function splitArgs(line: string): string[] {
   const args: string[] = [];
@@ -128,10 +130,24 @@ export function splitArgs(line: string): string[] {
   let started = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
-    if (c === "\\" && line[i + 1] === '"') {
-      current += '"';
+    if (c === "\\") {
+      let n = 0;
+      while (line[i + n] === "\\") n++;
+      if (line[i + n] === '"') {
+        // 2k `\` + `"` : k `\` puis un guillemet de structure ;
+        // 2k+1 `\` + `"` : k `\` puis un guillemet littéral.
+        current += "\\".repeat(Math.floor(n / 2));
+        if (n % 2 === 1) {
+          current += '"';
+          i += n;
+        } else {
+          i += n - 1;
+        }
+      } else {
+        current += "\\".repeat(n);
+        i += n - 1;
+      }
       started = true;
-      i++;
     } else if (c === '"') {
       quoted = !quoted;
       started = true;
@@ -152,8 +168,10 @@ export function splitArgs(line: string): string[] {
 export function joinArgs(args: string[]): string {
   return args
     .map((a) => {
-      const escaped = a.replace(/"/g, '\\"');
-      return a === "" || /[\s"]/.test(a) ? `"${escaped}"` : escaped;
+      if (a !== "" && !/[\s"]/.test(a)) return a;
+      // Les `\` devant un guillemet (ou devant le guillemet final) sont doublés.
+      const escaped = a.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1");
+      return `"${escaped}"`;
     })
     .join(" ");
 }

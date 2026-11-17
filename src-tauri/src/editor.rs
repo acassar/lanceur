@@ -254,7 +254,8 @@ fn build_tile(id: String, category: String, draft: &TileDraft) -> Result<Tile, A
             }
             Target::App {
                 path: path.to_string(),
-                args: args.iter().filter(|a| !a.is_empty()).cloned().collect(),
+                // Gardés tels quels, même vides (`""` peut compter pour le programme).
+                args: args.clone(),
             }
         }
         Target::Web { url } => {
@@ -375,7 +376,7 @@ mod tests {
         let added = add_tiles(
             dir.path(),
             &[
-                draft(r#"{ "name": " Notepad++ ", "category": "outils", "type": "app", "path": "\"C:\\Tools\\notepad++.exe\"", "args": ["-multiInst", ""] }"#),
+                draft(r#"{ "name": " Notepad++ ", "category": "outils", "type": "app", "path": "\"C:\\Tools\\notepad++.exe\"", "args": ["-multiInst"] }"#),
                 draft(r#"{ "name": "Discord", "category": "web", "type": "web", "url": "https://discord.com/app" }"#),
                 draft(r#"{ "name": "Portal 2", "category": "jeux", "type": "steam", "appId": 620, "icon": "  " }"#),
             ],

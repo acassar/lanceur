@@ -59,6 +59,9 @@ function close() {
 }
 
 async function browse(images: boolean) {
+  if (busy.value) return;
+  // Pendant que la boîte « Ouvrir » est ouverte, le formulaire est figé.
+  busy.value = true;
   try {
     const path = await ipc.pickFile(images);
     if (!path) return;
@@ -71,6 +74,8 @@ async function browse(images: boolean) {
     }
   } catch (e) {
     error.value = toIpcError(e).message;
+  } finally {
+    busy.value = false;
   }
 }
 

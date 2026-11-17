@@ -13,10 +13,11 @@ describe("arguments", () => {
     expect(splitArgs('  --title "Mon jeu"  -x ')).toEqual(["--title", "Mon jeu", "-x"]);
     expect(splitArgs('"" a\\"b')).toEqual(["", 'a"b']);
     expect(splitArgs("")).toEqual([]);
+    expect(splitArgs('"C:\\My Dir\\\\" C:\\a\\b')).toEqual(["C:\\My Dir\\", "C:\\a\\b"]);
   });
 
   it("joinArgs puis splitArgs redonne la même liste", () => {
-    for (const args of [["a", "b c", ""], ['--x="y"'], []]) {
+    for (const args of [["a", "b c", ""], ['--x="y"'], [], ["C:\\My Dir\\"], ['a\\"b c'], ["C:\\dir\\"]]) {
       expect(splitArgs(joinArgs(args))).toEqual(args);
     }
     expect(joinArgs(["--processStart", "Discord.exe"])).toBe("--processStart Discord.exe");
@@ -36,6 +37,7 @@ describe("champs", () => {
   it("adresse sans https://", () => {
     expect(normalizeUrl(" youtube.com ")).toBe("https://youtube.com");
     expect(normalizeUrl("http://a.fr")).toBe("http://a.fr");
+    expect(normalizeUrl("localhost:8080")).toBe("https://localhost:8080");
     expect(normalizeUrl("")).toBe("");
   });
 
