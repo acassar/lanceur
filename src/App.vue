@@ -71,15 +71,22 @@ function keepSearchFocus(e: MouseEvent) {
 //
 // Cet événement arrive aussi sans vrai départ : quand la liste d'un <select>
 // se referme, ou quand Windows rend le focus à la page. On ne touche donc à
-// rien si une fenêtre (éditeur, import…) est ouverte, ni si la recherche a
-// déjà le clavier : sinon on fermait les listes, et sélectionner le texte à
-// chaque fois faisait remplacer la recherche par la lettre suivante.
+// rien si une fenêtre (éditeur, import…) est ouverte : on lui volerait le
+// clavier et on refermerait ses listes. Et on ne resélectionne le texte que
+// si la fenêtre a vraiment été quittée un moment, sinon la lettre tapée
+// juste après remplacerait la recherche.
+const AWAY_MS = 400;
+let blurredAt = 0;
+const onWindowBlur = () => (blurredAt = Date.now());
 function onWindowFocus() {
-  if (editor.value || detectOpen.value || steamImportOpen.value) return;
+  if (modalOpen.value) return;
+  const away = blurredAt > 0 && Date.now() - blurredAt >= AWAY_MS;
   const input = searchBar.value?.input;
-  if (input && document.activeElement === input) return;
+  if (input && document.activeElement === input && !away) return;
   searchBar.value?.focus();
 }
+onMounted(() => window.addEventListener("blur", onWindowBlur));
+onBeforeUnmount(() => window.removeEventListener("blur", onWindowBlur));
 onMounted(() => window.addEventListener("focus", onWindowFocus));
 onBeforeUnmount(() => window.removeEventListener("focus", onWindowFocus));
 
@@ -99,9 +106,9 @@ onMounted(async () => {
   keep(await ipc.onConfigChanged(() => load()));
   // Menu de l'icône de notification : « Importer les jeux Steam… ».
   // Ignoré si l'éditeur de tuiles est ouvert (une seule fenêtre à la fois).
-  keep(await ipc.onSteamImportRequested(() => (steamImportOpen.value = !editor.value && !detectOpen.value)));
+  keep(await ipc.onSteamImportRequested(() => { if (!modalOpen.value) steamImportOpen.value = true; }));
   // « Détecter les applications… » : de même.
-  keep(await ipc.onDetectAppsRequested(() => (detectOpen.value = !editor.value && !steamImportOpen.value)));
+  keep(await ipc.onDetectAppsRequested(() => { if (!modalOpen.value) detectOpen.value = true; }));
   const stop = await ipc.onWindowShown(() => {
     L.query.value = "";
     L.rail.value = "all";
@@ -178,14 +185,16 @@ function onDetectImported(message: string, added: boolean) {
 // Éditeur de tuiles : `tile` absent pour une nouvelle tuile. La clé force un
 // nouveau formulaire à chaque ouverture.
 const editor = ref<{ key: number; tile?: Tile; category?: string } | null>(null);
+/** Une fenêtre par-dessus (éditeur, détection, import Steam) est ouverte. */
+const modalOpen = computed(() => !!editor.value || detectOpen.value || steamImportOpen.value);
 let editorKey = 0;
 function addTile() {
-  if (steamImportOpen.value || detectOpen.value) return;
+  if (modalOpen.value) return;
   // Nouvelle tuile rangée par défaut dans la catégorie affichée.
   editor.value = { key: ++editorKey, category: L.rail.value };
 }
 function editTile(tile: Tile) {
-  if (steamImportOpen.value || detectOpen.value) return;
+  if (modalOpen.value) return;
   editor.value = { key: ++editorKey, tile };
 }
 function closeEditor() {
