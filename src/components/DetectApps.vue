@@ -7,7 +7,7 @@
 // Ouverte depuis l'écran d'accueil (premier démarrage) ou le menu de l'icône
 // de notification, à tout moment. Même principe que SteamImport.vue : un
 // <dialog> natif modal, déplacé dans <body>.
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { appsCategory, detectMessage, filterApps, selection } from "../lib/detect";
 import { ipc, toIpcError } from "../lib/ipc";
 import { targetCategory, toChoices } from "../lib/steam";
@@ -75,6 +75,21 @@ async function detect() {
   if (freshApps.value.length > 8) filterInput.value?.focus();
   else submitButton.value?.focus();
 }
+
+// config.json rechargé pendant que la fenêtre est ouverte (modifié à la main,
+// ou jeux ajoutés avant une erreur) : Rust recalcule quelles applications ont
+// déjà une tuile. Les cases cochées restent cochées.
+watch(
+  () => props.config,
+  async () => {
+    if (!detectedApps.value || busy.value) return;
+    try {
+      detectedApps.value = await ipc.detectApps();
+    } catch (e) {
+      console.error(e);
+    }
+  },
+);
 
 function close() {
   if (!busy.value) emit("close");

@@ -78,6 +78,10 @@ pub enum AppError {
     #[error("Steam : {0}")]
     Steam(String),
 
+    /// Détection des applications installées interrompue (lecture seule).
+    #[error("Détection des applications : {0}")]
+    Detect(String),
+
     /// Windows a refusé de lancer la cible (`reason` vient de Windows).
     #[error("Impossible de lancer {target} : {reason}")]
     Launch { target: String, reason: String },
@@ -97,6 +101,7 @@ impl AppError {
             | AppError::InvalidUrl(_)
             | AppError::ConfigWrite(_)
             | AppError::Steam(_)
+            | AppError::Detect(_)
             | AppError::Launch { .. } => None,
             AppError::NotFound(path) => Some(path),
             AppError::Io { path, .. }

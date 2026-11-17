@@ -88,7 +88,8 @@ pub fn detect(config: Option<&Config>) -> Vec<DetectedApp> {
             })
         })
         .collect();
-    let mut apps = shortcuts(&roots, &win::shortcut_target);
+    // COM est initialisé une fois pour tout le parcours (voir `win`).
+    let mut apps = win::with_shortcut_reader(|target| shortcuts(&roots, target));
     if let Some(config) = config {
         mark_in_config(&mut apps, config);
     }
@@ -102,10 +103,17 @@ fn shortcuts(roots: &[Root], target: &dyn Fn(&Path) -> Option<PathBuf>) -> Vec<D
     for root in roots {
         collect(&root.dir, &root.dir, root, target, 0, &mut found);
     }
-    // Même nom dans les deux menus (installé pour tous *et* pour vous) : on
-    // n'en garde qu'un. `insert` renvoie `false` pour un nom déjà vu.
+    // Même raccourci (même dossier, même nom) dans les deux menus, installé
+    // pour tous *et* pour vous : on n'en garde qu'un. Deux raccourcis du même
+    // nom dans des dossiers différents restent deux applications distinctes.
+    // `insert` renvoie `false` pour une clé déjà vue.
     let mut seen = HashSet::new();
-    found.retain(|a| seen.insert(a.name.to_lowercase()));
+    found.retain(|a| {
+        seen.insert((
+            a.folder.as_deref().unwrap_or("").to_lowercase(),
+            a.name.to_lowercase(),
+        ))
+    });
     found.sort_by_cached_key(|a| a.name.to_lowercase());
     found
 }
@@ -354,8 +362,11 @@ fn plan(config: &Config, apps: &[DetectedApp]) -> (String, Vec<TileDraft>) {
 
 /// Lit `config.json` sans le créer ni échouer : pour marquer les applications
 /// déjà présentes, une config absente ou invalide revient à « aucune tuile ».
+/// (Pas `load_cached`, qui créerait le fichier s'il manquait.)
 pub fn current_config(dir: &Path) -> Option<Config> {
-    config::load_cached(dir).ok()
+    let path = dir.join(config::FILE_NAME);
+    let text = fs::read_to_string(&path).ok()?;
+    config::parse(&text, &path).ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -376,18 +387,33 @@ mod win {
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
     use windows::core::{Interface, PCWSTR};
 
-    /// Cible d'un `.lnk` (`C:\…\Discord.exe`), lue avec `IShellLinkW`, l'objet
-    /// COM de Windows qui décrit un raccourci. `None` si elle est inconnue :
-    /// c'est le cas des raccourcis « annoncés » d'Office (installés par MSI),
-    /// qu'on garde donc.
-    pub fn shortcut_target(lnk: &Path) -> Option<PathBuf> {
+    /// Appelle `f` avec une fonction qui lit la cible d'un `.lnk`
+    /// (`C:\…\Discord.exe`) grâce à `IShellLinkW`, l'objet COM de Windows qui
+    /// décrit un raccourci. La cible vaut `None` si elle est inconnue : c'est
+    /// le cas des raccourcis « annoncés » d'Office (installés par MSI), qu'on
+    /// garde donc.
+    ///
+    /// COM est initialisé une seule fois, autour de tout le parcours, et
+    /// libéré à la fin (seulement si c'est nous qui l'avons initialisé).
+    pub fn with_shortcut_reader<R>(f: impl FnOnce(&dyn Fn(&Path) -> Option<PathBuf>) -> R) -> R {
+        // SAFETY : COM est initialisé sur ce thread avant tout objet COM, et
+        // libéré après `f`, quand plus aucun objet COM n'existe (chaque appel
+        // de `shortcut_target` détruit les siens avant de rendre la main).
+        let com =
+            unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
+        let result = f(&shortcut_target);
+        if com.is_ok() {
+            unsafe { CoUninitialize() };
+        }
+        result
+    }
+
+    fn shortcut_target(lnk: &Path) -> Option<PathBuf> {
         // Chemin en UTF-16 terminé par 0, le format des API Windows.
         let lnk_w: Vec<u16> = lnk.as_os_str().encode_wide().chain([0]).collect();
-        // SAFETY : `lnk_w` vit jusqu'à la fin de la fonction ; COM est
-        // initialisé avant les objets COM, et libéré (si on l'a initialisé)
-        // après leur destruction, à la fin de la closure.
+        // SAFETY : `lnk_w` vit jusqu'à la fin de la fonction, et `buf` est
+        // un tampon dont GetPath connaît la taille.
         unsafe {
-            let com = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
             let result = (|| -> windows::core::Result<Option<PathBuf>> {
                 let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
                 // `cast` : demander à l'objet une autre de ses interfaces
@@ -399,9 +425,6 @@ mod win {
                 let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
                 Ok((len > 0).then(|| PathBuf::from(String::from_utf16_lossy(&buf[..len]))))
             })();
-            if com.is_ok() {
-                CoUninitialize();
-            }
             result.ok().flatten()
         }
     }
@@ -412,8 +435,8 @@ mod win {
     use std::path::{Path, PathBuf};
 
     /// Hors Windows, pas de raccourcis à lire : cible toujours inconnue.
-    pub fn shortcut_target(_lnk: &Path) -> Option<PathBuf> {
-        None
+    pub fn with_shortcut_reader<R>(f: impl FnOnce(&dyn Fn(&Path) -> Option<PathBuf>) -> R) -> R {
+        f(&|_| None)
     }
 }
 
@@ -508,6 +531,7 @@ mod tests {
                 .join("Trop loin.lnk"),
         );
         touch(&me.join("a").join("Jeu.lnk"));
+        touch(&me.join("b").join("Jeu.lnk")); // même nom, autre application
 
         let roots = [root(&all, "%ProgramData%\\P"), root(&me, "%APPDATA%\\P")];
         let target = |p: &Path| {
@@ -518,7 +542,14 @@ mod tests {
         let names: Vec<&str> = apps.iter().map(|a| a.name.as_str()).collect();
         assert_eq!(
             names,
-            ["Discord", "Firefox", "Jeu", "Steam", "VLC media player"]
+            [
+                "Discord",
+                "Firefox",
+                "Jeu",
+                "Jeu",
+                "Steam",
+                "VLC media player"
+            ]
         );
         let discord = &apps[0];
         assert_eq!(discord.path, r"%APPDATA%\P\Discord Inc\Discord.lnk");

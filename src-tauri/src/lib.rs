@@ -334,7 +334,7 @@ async fn detect_apps(app: tauri::AppHandle) -> Result<Vec<apps::DetectedApp>, Ap
     // Parcours de dossiers et lecture de raccourcis : sur un thread d'attente.
     tauri::async_runtime::spawn_blocking(move || apps::detect(apps::current_config(&dir).as_ref()))
         .await
-        .map_err(|e| AppError::ConfigWrite(format!("détection interrompue ({e})")))
+        .map_err(|e| AppError::Detect(format!("recherche interrompue ({e})")))
 }
 
 /// Commande `import_apps` : `invoke("import_apps", { paths: ["%APPDATA%\\…\\Discord.lnk"] })`.
