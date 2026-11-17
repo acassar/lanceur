@@ -15,6 +15,7 @@ import WelcomeScreen from "./components/WelcomeScreen.vue";
 import { useKeyboardNav, type Direction } from "./composables/useKeyboardNav";
 import { useLauncher } from "./composables/useLauncher";
 import { ipc, toIpcError } from "./lib/ipc";
+import { applyTileOrder } from "./lib/reorder";
 import { importMessage } from "./lib/steam";
 import { kindLabel, targetText } from "./lib/tiles";
 import type { SteamImportResult, Tile } from "./lib/types";
@@ -185,6 +186,45 @@ function onTileDeleted(tile: Tile) {
   load();
 }
 
+// Glisser-déposer. Pas pendant une recherche : la liste affichée n'est alors
+// qu'une partie des tuiles. Ni Récents (ordre des lancements).
+const canReorder = computed(() => !!L.config.value && !L.query.value.trim());
+function sectionReorderable(key: string) {
+  return canReorder.value && (key === "favorites" || !!L.config.value?.categories.some((c) => c.id === key));
+}
+/**
+ * Applique tout de suite le nouvel ordre à l'écran, puis l'enregistre. En cas
+ * d'échec (fichier modifié à la main entre-temps…), on recharge le fichier.
+ */
+async function reorder(save: () => Promise<void>, apply: () => void) {
+  const before = L.current.value?.id;
+  apply();
+  // La tuile sélectionnée reste sélectionnée à sa nouvelle place.
+  const i = before ? L.flat.value.findIndex((t) => t.id === before) : -1;
+  if (i >= 0) L.selected.value = i;
+  try {
+    await save();
+  } catch (e) {
+    showToast({ message: "Nouvel ordre non enregistré", detail: toIpcError(e).message, error: true });
+    load();
+  }
+}
+function reorderSection(key: string, ids: string[]) {
+  const cfg = L.config.value;
+  if (!cfg) return;
+  if (key === "favorites") reorder(() => ipc.reorderFavorites(ids), () => (cfg.favorites = ids));
+  else reorder(() => ipc.reorderTiles(key, ids), () => applyTileOrder(cfg, key, ids));
+}
+function reorderCategories(ids: string[]) {
+  const cfg = L.config.value;
+  if (!cfg) return;
+  const byId = new Map(cfg.categories.map((c) => [c.id, c]));
+  reorder(
+    () => ipc.reorderCategories(ids),
+    () => (cfg.categories = ids.map((id) => byId.get(id)!)),
+  );
+}
+
 const ARROWS: Record<string, Direction> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
 function onKeydown(e: KeyboardEvent) {
@@ -248,7 +288,9 @@ onMounted(load);
         v-model="L.rail.value"
         :items="L.railItems.value"
         :tile-count="L.config.value?.tiles.length ?? 0"
+        :reorderable="!!L.config.value"
         @add-tile="L.config.value && addTile()"
+        @reorder="reorderCategories"
       />
 
       <div ref="scroller" class="scroll">
@@ -283,7 +325,9 @@ onMounted(load);
           @launch="launch"
           @hover="(i) => (L.selected.value = i)"
           @toggle-favorite="toggleFavorite"
+          :reorderable="sectionReorderable(section.key)"
           @edit="editTile"
+          @reorder="(ids) => reorderSection(section.key, ids)"
         />
       </div>
     </div>

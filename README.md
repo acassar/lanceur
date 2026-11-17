@@ -44,6 +44,8 @@ La croix de la fenêtre la masque au lieu de fermer l'app (le raccourci doit res
 
 Un clic droit sur une tuile (ou le crayon au survol, `Ctrl+E`, `F2`) ouvre le même formulaire pour la modifier ; *Supprimer*, puis *Confirmer la suppression*, la retire (et de vos favoris). Les catégories ne sont jamais supprimées.
 
+Pour réordonner, glissez une tuile à sa nouvelle place dans sa catégorie ou dans Favoris (pas pendant une recherche, ni dans Récents), ou une catégorie dans le rail. Seul l'ordre des lignes concernées change dans `config.json`.
+
 Comme pour les favoris, seules les lignes concernées de `config.json` changent : une tuile ajoutée ou modifiée est écrite sur une ligne, le reste du fichier (ordre, lignes vides, mise en forme) ne bouge pas, et un fichier invalide n'est jamais modifié. L'id d'une nouvelle tuile est tiré de son nom ; il ne change plus ensuite.
 
 ### Importer les jeux Steam

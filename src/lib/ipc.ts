@@ -24,6 +24,12 @@ export interface Ipc {
   updateTile(id: string, draft: TileDraft): Promise<Tile>;
   /** Supprime la tuile `id` de config.json, et de ses favoris. */
   deleteTile(id: string): Promise<void>;
+  /** Nouvel ordre de toutes les tuiles de `category` (glisser-déposer). */
+  reorderTiles(category: string, ids: string[]): Promise<void>;
+  /** Nouvel ordre de toutes les catégories. */
+  reorderCategories(ids: string[]): Promise<void>;
+  /** Nouvel ordre de tous les favoris. */
+  reorderFavorites(ids: string[]): Promise<void>;
   /**
    * Ouvre la boîte « Ouvrir » de Windows : un programme/raccourci, ou une image
    * si `images`. Renvoie le chemin choisi, ou `null` si annulé.
@@ -109,6 +115,9 @@ function createTauriIpc(): Ipc {
     addTile: (draft) => invoke<Tile>("add_tile", { draft }),
     updateTile: (id, draft) => invoke<Tile>("update_tile", { id, draft }),
     deleteTile: (id) => invoke("delete_tile", { id }),
+    reorderTiles: (category, ids) => invoke("reorder_tiles", { category, ids }),
+    reorderCategories: (ids) => invoke("reorder_categories", { ids }),
+    reorderFavorites: (ids) => invoke("reorder_favorites", { ids }),
     pickFile: (images) => invoke<string | null>("pick_file", { images }),
     detectSteamGames: () => invoke<SteamGame[]>("detect_steam_games"),
     importSteamGames: (appIds) => invoke<SteamImportResult>("import_steam_games", { appIds }),

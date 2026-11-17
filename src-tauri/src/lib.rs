@@ -200,6 +200,38 @@ async fn delete_tile(app: tauri::AppHandle, id: String) -> Result<(), AppError> 
         .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
 }
 
+/// Commande `reorder_tiles` : nouvel ordre des tuiles d'une catégorie
+/// (glisser-déposer). `ids` : toutes les tuiles de `category`, dans l'ordre voulu.
+#[tauri::command]
+async fn reorder_tiles(
+    app: tauri::AppHandle,
+    category: String,
+    ids: Vec<String>,
+) -> Result<(), AppError> {
+    let dir = config::config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || editor::reorder_tiles(&dir, &category, &ids))
+        .await
+        .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
+}
+
+/// Commande `reorder_categories` : nouvel ordre de toutes les catégories.
+#[tauri::command]
+async fn reorder_categories(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), AppError> {
+    let dir = config::config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || editor::reorder_categories(&dir, &ids))
+        .await
+        .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
+}
+
+/// Commande `reorder_favorites` : nouvel ordre de tous les favoris.
+#[tauri::command]
+async fn reorder_favorites(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), AppError> {
+    let dir = config::config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || editor::reorder_favorites(&dir, &ids))
+        .await
+        .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
+}
+
 /// Commande `pick_file` : ouvre la boîte « Ouvrir » de Windows et renvoie le
 /// chemin choisi (`None` si l'utilisateur annule). `images` : filtre sur les
 /// images (icône) au lieu des programmes.
@@ -451,6 +483,9 @@ pub fn run() {
             update_tile,
             delete_tile,
             pick_file,
+            reorder_tiles,
+            reorder_categories,
+            reorder_favorites,
             detect_steam_games,
             import_steam_games,
             get_icon,

@@ -4,6 +4,7 @@
 //
 // Dans l'app (Tauri), ipc.ts utilise les vraies commandes Rust à la place.
 import type { Ipc } from "./ipc";
+import { applyTileOrder } from "./reorder";
 import type { Category, Config, SteamGame, Tile, TileDraft } from "./types";
 
 export const SAMPLE: Config = {
@@ -163,6 +164,19 @@ export function createMockIpc(
       edit((c) => {
         c.tiles = c.tiles.filter((t) => t.id !== id);
         c.favorites = c.favorites.filter((f) => f !== id);
+      });
+    },
+    async reorderTiles(category, ids) {
+      edit((c) => applyTileOrder(c, category, ids));
+    },
+    async reorderCategories(ids) {
+      edit((c) => {
+        c.categories = ids.map((id) => c.categories.find((x) => x.id === id)).filter((x): x is Category => !!x);
+      });
+    },
+    async reorderFavorites(ids) {
+      edit((c) => {
+        c.favorites = [...ids];
       });
     },
     async pickFile(images) {
