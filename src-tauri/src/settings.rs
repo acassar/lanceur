@@ -37,7 +37,7 @@ pub fn update(dir: &Path, changes: &Map<String, Value>) -> Result<Settings, AppE
     let current = config::parse(&text, &path)?;
 
     let wanted = merge(&current.settings, changes)?;
-    check(&wanted)?;
+    check(&current.settings, &wanted)?;
 
     // Réglages qui changent vraiment, sous forme JSON : `"hotkey"` → `"\"Super\""`.
     let before = to_object(&current.settings)?;
@@ -90,13 +90,17 @@ fn merge(current: &Settings, changes: &Map<String, Value>) -> Result<Settings, A
     serde_json::from_value(Value::Object(object)).map_err(|e| invalid(e.to_string()))
 }
 
-/// Les vérifications que serde ne fait pas.
-fn check(settings: &Settings) -> Result<(), AppError> {
-    window::parse_trigger(&settings.hotkey).map_err(invalid)?;
-    if settings.browser.trim().is_empty() {
+/// Les vérifications que serde ne fait pas, sur les réglages *modifiés*
+/// seulement : un raccourci invalide écrit à la main ne doit pas empêcher de
+/// changer le navigateur (le bandeau d'erreur signale déjà le raccourci).
+fn check(before: &Settings, settings: &Settings) -> Result<(), AppError> {
+    if settings.hotkey != before.hotkey {
+        window::parse_trigger(&settings.hotkey).map_err(invalid)?;
+    }
+    if settings.browser != before.browser && settings.browser.trim().is_empty() {
         return Err(invalid("choisissez un navigateur pour les apps web".into()));
     }
-    if settings.accent.trim().is_empty() {
+    if settings.accent != before.accent && settings.accent.trim().is_empty() {
         return Err(invalid("la couleur d'accent est vide".into()));
     }
     Ok(())
@@ -170,6 +174,14 @@ mod tests {
         assert!(update(dir.path(), &changes(json!({ "hotkey": "F9" }))).is_err());
         assert!(update(dir.path(), &changes(json!({ "browser": "  " }))).is_err());
         assert_eq!(read(&dir), TEXT);
+    }
+
+    #[test]
+    fn un_raccourci_invalide_deja_la_ne_bloque_pas_le_reste() {
+        let text = TEXT.replace("Super+Alt+Space", "Ctrl+Truc");
+        let dir = setup(&text);
+        update(dir.path(), &changes(json!({ "hideOnBlur": false }))).unwrap();
+        assert_eq!(read(&dir), text.replace("true", "false"));
     }
 
     #[test]

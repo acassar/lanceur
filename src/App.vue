@@ -399,7 +399,7 @@ onMounted(load);
       </div>
     </div>
 
-    <HotkeyWarning v-if="hotkeyError" :message="hotkeyError" @settings="openSettings" />
+    <HotkeyWarning v-if="hotkeyError" :message="hotkeyError" @settings="L.config.value ? openSettings() : openConfigFolder()" />
     <StatusBar :kind="status.kind" :target="status.target" />
     <TileEditor
       v-if="editor && L.config.value"

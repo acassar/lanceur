@@ -51,6 +51,9 @@ struct Tracker {
     win: u32,
     /// Une autre touche a été enfoncée depuis : ce n'est pas « Win seule ».
     combined: bool,
+    /// Dernière touche vue, et si c'était un appui : sert à reconnaître les
+    /// répétitions automatiques d'une touche maintenue.
+    last: (u32, bool),
 }
 
 /// Décision du hook pour une touche.
@@ -72,18 +75,28 @@ const VK_RWIN: u32 = 0x5C;
 #[cfg_attr(not(windows), allow(dead_code))]
 impl Tracker {
     /// `vk` : code de la touche ; `down` : enfoncée (sinon relâchée) ;
-    /// `modifiers_held` : Ctrl, Maj ou Alt étaient déjà enfoncées.
-    fn on_key(&mut self, vk: u32, down: bool, modifiers_held: bool) -> Action {
+    /// `modifiers_held` : dit si Ctrl, Maj ou Alt étaient déjà enfoncées.
+    /// C'est une fonction, appelée seulement au premier appui sur Win : le
+    /// hook voit passer toutes les touches du PC, on ne demande l'état des
+    /// autres touches à Windows que quand c'est utile.
+    fn on_key(&mut self, vk: u32, down: bool, modifiers_held: impl FnOnce() -> bool) -> Action {
         let is_win = vk == VK_LWIN || vk == VK_RWIN;
+        // Une touche maintenue envoie des appuis à répétition, sans rien entre
+        // eux. Un appui précédé d'autre chose est donc un *nouvel* appui.
+        let repeat = down && self.last == (vk, true);
+        self.last = (vk, down);
         match (is_win, down) {
             (true, true) => {
-                if self.win == 0 {
-                    // Premier appui (les répétitions de la touche maintenue
-                    // arrivent aussi comme des appuis : on les ignore).
+                if repeat {
+                    // Win maintenue : rien de nouveau.
+                } else if self.win == 0 || vk == self.win {
+                    // Nouvel appui. (`vk == self.win` : le relâchement
+                    // précédent ne nous est jamais parvenu, par exemple après
+                    // Win+L, l'écran de verrouillage l'a gardé : on repart de zéro.)
                     self.win = vk;
                     // `Ctrl` déjà enfoncée puis Win : c'est une combinaison.
-                    self.combined = modifiers_held;
-                } else if vk != self.win {
+                    self.combined = modifiers_held();
+                } else {
                     // Les deux touches Windows en même temps.
                     self.combined = true;
                 }
@@ -115,6 +128,7 @@ impl Tracker {
 mod imp {
     use std::sync::mpsc;
     use std::sync::{Mutex, OnceLock};
+    use std::thread::JoinHandle;
 
     use tauri::AppHandle;
     use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
@@ -136,13 +150,15 @@ mod imp {
     /// L'app, pour afficher la fenêtre depuis le hook. `OnceLock` : une
     /// variable globale qu'on remplit une seule fois, ensuite en lecture seule.
     static APP: OnceLock<AppHandle> = OnceLock::new();
-    /// Identifiant du thread du hook, s'il tourne (pour lui dire de s'arrêter).
-    static THREAD: Mutex<Option<u32>> = Mutex::new(None);
+    /// Identifiant du thread du hook, s'il tourne (pour lui dire de s'arrêter),
+    /// et de quoi attendre qu'il soit fini (`JoinHandle`).
+    static THREAD: Mutex<Option<(u32, JoinHandle<()>)>> = Mutex::new(None);
     /// État des touches. Le hook n'est appelé que depuis son propre thread,
     /// le verrou n'est donc jamais disputé ; il rassure seulement le compilateur.
     static TRACKER: Mutex<Tracker> = Mutex::new(Tracker {
         win: 0,
         combined: false,
+        last: (0, false),
     });
 
     /// Code de la touche « neutre » : non attribué, aucun clavier ne l'envoie.
@@ -165,24 +181,29 @@ mod imp {
         // touches par là. On crée donc un thread dédié, qui nous répond par
         // un *canal* (`mpsc::channel`) si l'installation a réussi.
         let (tx, rx) = mpsc::channel::<Result<u32, String>>();
-        std::thread::Builder::new()
+        let handle = std::thread::Builder::new()
             .name("touche-windows".into())
             .spawn(move || run(tx))
             .map_err(|e| e.to_string())?;
         let id = rx
             .recv()
             .map_err(|_| "le thread du hook s'est arrêté".to_string())??;
-        *thread = Some(id);
+        *thread = Some((id, handle));
         // Repartir de zéro (une touche restée « enfoncée » d'un essai précédent).
         *lock(&TRACKER) = Tracker::default();
         Ok(())
     }
 
     pub fn stop() {
-        if let Some(id) = lock(&THREAD).take() {
+        // On garde le verrou jusqu'au bout : un `start()` qui suivrait de près
+        // attend ainsi que l'ancien hook soit retiré (jamais deux à la fois).
+        let mut thread = lock(&THREAD);
+        if let Some((id, handle)) = thread.take() {
             // `WM_QUIT` fait sortir la boucle de messages : le thread retire
-            // alors le hook et s'arrête.
-            let _ = unsafe { PostThreadMessageW(id, WM_QUIT, WPARAM(0), LPARAM(0)) };
+            // alors le hook et s'arrête. `join` attend cette fin (immédiate).
+            if unsafe { PostThreadMessageW(id, WM_QUIT, WPARAM(0), LPARAM(0)) }.is_ok() {
+                let _ = handle.join();
+            }
         }
     }
 
@@ -223,10 +244,12 @@ mod imp {
             if key.dwExtraInfo != OURS {
                 let message = wparam.0 as u32;
                 let down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
-                let modifiers = [VK_CONTROL, VK_SHIFT, VK_MENU]
-                    .iter()
-                    // Bit de poids fort : touche actuellement enfoncée.
-                    .any(|&vk| unsafe { GetAsyncKeyState(vk.0 as i32) } < 0);
+                let modifiers = || {
+                    [VK_CONTROL, VK_SHIFT, VK_MENU]
+                        .iter()
+                        // Bit de poids fort : touche actuellement enfoncée.
+                        .any(|&vk| unsafe { GetAsyncKeyState(vk.0 as i32) } < 0)
+                };
                 let action = lock(&TRACKER).on_key(key.vkCode, down, modifiers);
                 if action == Action::Toggle {
                     hide_start_menu(key.vkCode as u16);
@@ -292,7 +315,7 @@ mod tests {
     fn run(keys: &[(u32, bool)]) -> Vec<Action> {
         let mut t = Tracker::default();
         keys.iter()
-            .map(|&(vk, down)| t.on_key(vk, down, false))
+            .map(|&(vk, down)| t.on_key(vk, down, || false))
             .collect()
     }
 
@@ -326,8 +349,8 @@ mod tests {
         );
         // Ctrl déjà enfoncée avant Win.
         let mut t = Tracker::default();
-        assert_eq!(t.on_key(VK_LWIN, true, true), Action::Pass);
-        assert_eq!(t.on_key(VK_LWIN, false, true), Action::Pass);
+        assert_eq!(t.on_key(VK_LWIN, true, || true), Action::Pass);
+        assert_eq!(t.on_key(VK_LWIN, false, || true), Action::Pass);
     }
 
     #[test]
@@ -349,6 +372,18 @@ mod tests {
                 Action::Pass,
                 Action::Toggle
             ]
+        );
+        // Relâchement de Win jamais reçu (Win+L : l'écran de verrouillage
+        // l'a gardé) : le prochain appui repart de zéro.
+        assert_eq!(
+            run(&[
+                (VK_LWIN, true),
+                (0x4C, true),
+                (0x4C, false),
+                (VK_LWIN, true),
+                (VK_LWIN, false)
+            ])[4],
+            Action::Toggle
         );
         // Une touche relâchée seule (enfoncée avant Win) ne compte pas.
         assert_eq!(

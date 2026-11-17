@@ -23,15 +23,18 @@ const BROWSERS = [
 const OTHER_BROWSER = "__autre__";
 const ACCENTS = ["#f0a35e", "#e06c75", "#c678dd", "#5e9ef0", "#56b6c2", "#98c379", "#e5c07b"];
 
+// Copie figée à l'ouverture : si config.json est rechargé pendant que l'écran
+// est ouvert, on ne renvoie toujours que ce que l'utilisateur a changé ici.
+const original: Settings = { ...props.settings };
 const dialog = ref<HTMLDialogElement | null>(null);
-const form = ref<Settings>({ ...props.settings });
+const form = ref<Settings>({ ...original });
 const error = ref<string | null>(null);
 const busy = ref(false);
 
 // --- Raccourci ---------------------------------------------------------------
 
 /** Dernière combinaison choisie, reproposée en revenant de « Touche Windows seule ». */
-let lastCombo = isLoneWin(props.settings.hotkey) ? DEFAULT_HOTKEY : props.settings.hotkey;
+let lastCombo = isLoneWin(original.hotkey) ? DEFAULT_HOTKEY : original.hotkey;
 const loneWin = computed({
   get: () => isLoneWin(form.value.hotkey),
   set: (on) => {
@@ -91,8 +94,8 @@ function onCaptureKeyUp(e: KeyboardEvent) {
 
 // --- Navigateur --------------------------------------------------------------
 
-const browserChoice = ref(BROWSERS.some((b) => b.value === props.settings.browser) ? props.settings.browser : OTHER_BROWSER);
-const customBrowser = ref(browserChoice.value === OTHER_BROWSER ? props.settings.browser : "");
+const browserChoice = ref(BROWSERS.some((b) => b.value === original.browser) ? original.browser : OTHER_BROWSER);
+const customBrowser = ref(browserChoice.value === OTHER_BROWSER ? original.browser : "");
 const browserInput = ref<HTMLInputElement | null>(null);
 async function onBrowserChoice() {
   if (browserChoice.value === OTHER_BROWSER) {
@@ -103,17 +106,23 @@ async function onBrowserChoice() {
 
 // --- Enregistrement ----------------------------------------------------------
 
+/** Nombre de récents saisi ; un champ vide ou invalide garde la valeur d'origine. */
+function recents(): number {
+  const n = Number(form.value.recentsCount);
+  return Number.isFinite(n) && String(form.value.recentsCount).trim() !== "" ? Math.max(0, Math.round(n)) : original.recentsCount;
+}
+
 /** Les réglages modifiés par rapport à ceux reçus (eux seuls sont envoyés). */
 function changes(): Partial<Settings> {
   const wanted: Settings = {
     ...form.value,
     browser: browserChoice.value === OTHER_BROWSER ? customBrowser.value.trim() : browserChoice.value,
     accent: form.value.accent.trim(),
-    recentsCount: Math.max(0, Math.min(50, Math.round(Number(form.value.recentsCount) || 0))),
+    recentsCount: recents(),
   };
   const diff: Partial<Settings> = {};
   for (const key of Object.keys(wanted) as (keyof Settings)[]) {
-    if (wanted[key] !== props.settings[key]) (diff as Record<string, unknown>)[key] = wanted[key];
+    if (wanted[key] !== original[key]) (diff as Record<string, unknown>)[key] = wanted[key];
   }
   return diff;
 }
@@ -230,7 +239,7 @@ onMounted(() => dialog.value?.showModal());
         </label>
         <label class="inline">
           Tuiles dans « Récents »
-          <input v-model.number="form.recentsCount" type="number" min="0" max="50" class="num" :disabled="busy" />
+          <input v-model.number="form.recentsCount" type="number" min="0" class="num" :disabled="busy" />
           <em>(0 pour masquer la section)</em>
         </label>
       </fieldset>
