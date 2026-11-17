@@ -2,7 +2,7 @@
 // invoke() directement : ils passent par cet objet typé.
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { createMockIpc } from "./ipc.mock";
+import { SAMPLE, createMockIpc } from "./ipc.mock";
 import type { Config } from "./types";
 
 export interface Ipc {
@@ -87,8 +87,11 @@ function createTauriIpc(): Ipc {
 }
 
 function createBrowserIpc(): Ipc {
+  // `npm run dev` puis http://localhost:1420/?vide : config sans tuiles, comme
+  // au premier démarrage (pour voir l'écran d'accueil).
+  const empty = typeof location !== "undefined" && new URLSearchParams(location.search).has("vide");
   return {
-    ...createMockIpc(),
+    ...(empty ? createMockIpc(async () => ({ ...structuredClone(SAMPLE), categories: [], favorites: [], tiles: [] })) : createMockIpc()),
     async openConfigFolder() {
       console.info("[ipc mock] open_config_folder");
     },

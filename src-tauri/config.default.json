@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/acassar/lanceur/main/config.schema.json",
+  "version": 1,
+  "settings": {
+    "hotkey": "Super+Alt+Space",
+    "hideAfterLaunch": true,
+    "hideOnBlur": true,
+    "accent": "#f0a35e",
+    "browser": "msedge",
+    "recentsCount": 4
+  },
+  "categories": [],
+  "favorites": [],
+  "tiles": []
+}

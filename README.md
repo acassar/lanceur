@@ -35,7 +35,7 @@ Toute la configuration est dans un fichier JSON lisible :
 %APPDATA%\io.github.acassar.lanceur\config.json
 ```
 
-Il est créé avec des exemples au premier démarrage. Le lien « ouvrir le dossier » de l'app (affiché quand une catégorie est vide ou que le fichier contient une erreur) ouvre ce dossier dans l'Explorateur.
+Au premier démarrage, il est créé **sans tuiles** (réglages par défaut, listes `categories`, `favorites` et `tiles` vides) : l'app affiche alors un écran d'accueil avec un exemple à copier. Une config déjà existante n'est jamais modifiée. Un exemple complet se trouve dans [src-tauri/config.example.json](src-tauri/config.example.json). Le bouton « Ouvrir le dossier » de l'app (écran d'accueil, catégorie vide ou erreur dans le fichier) ouvre ce dossier dans l'Explorateur.
 
 **Le fichier est relu dès qu'il est enregistré** : les tuiles, les catégories et les réglages (raccourci compris) changent aussitôt, sans redémarrer. S'il contient une erreur, l'app l'affiche (ligne, colonne, tuile concernée) et garde la dernière version valide.
 

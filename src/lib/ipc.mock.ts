@@ -6,7 +6,7 @@
 import type { Ipc } from "./ipc";
 import type { Config } from "./types";
 
-const SAMPLE: Config = {
+export const SAMPLE: Config = {
   version: 1,
   settings: {
     hotkey: "Super+Alt+Space",

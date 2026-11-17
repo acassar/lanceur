@@ -151,7 +151,7 @@ Règles :
 - `icon` est optionnel et remplace l'icône trouvée automatiquement.
 - Les variables d'environnement (`%APPDATA%`, `%LOCALAPPDATA%`…) sont développées au lancement.
 - Un `config.schema.json` (JSON Schema) est fourni à la racine du repo. VS Code proposera alors l'autocomplétion et signalera les erreurs pendant l'édition à la main.
-- Au premier démarrage, si le fichier n'existe pas, l'app crée une config d'exemple.
+- Au premier démarrage, si le fichier n'existe pas, l'app crée une config sans tuiles (réglages par défaut, listes vides) et affiche un écran d'accueil qui explique comment la remplir. Un `config.json` existant n'est jamais modifié.
 - L'app surveille le fichier : dès qu'il est enregistré, les tuiles et les réglages (raccourci compris) sont rechargés, sans redémarrer.
 - Si le JSON est invalide, l'app affiche l'erreur (ligne et colonne) dans la fenêtre au lieu de planter, et garde la dernière config valide.
 
