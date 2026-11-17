@@ -1,8 +1,8 @@
 //! Icône dans la zone de notification (à droite de la barre des tâches).
 //!
 //! - Clic gauche : affiche la fenêtre, ou la masque si elle était devant.
-//! - Clic droit : un menu « Afficher le lanceur », « Ouvrir le dossier de
-//!   config » et « Quitter ».
+//! - Clic droit : un menu « Afficher le lanceur », « Importer les jeux
+//!   Steam… », « Ouvrir le dossier de config » et « Quitter ».
 //!
 //! Avec cette icône, la croix de la fenêtre ne quitte plus l'app : elle la
 //! masque, comme Échap (voir `window::on_window_event`). On quitte par le menu.
@@ -10,9 +10,9 @@
 //! Notions Rust abordées : le *builder pattern* (on enchaîne `.tooltip(…)`,
 //! `.menu(…)`… puis `.build()`), et `match` sur des textes.
 
-use tauri::AppHandle;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter};
 
 use crate::window;
 
@@ -22,6 +22,11 @@ pub const TRAY_ID: &str = "main";
 // Identifiants des entrées du menu, reçus dans `on_menu`.
 const SHOW: &str = "show";
 const OPEN_CONFIG: &str = "open-config";
+const IMPORT_STEAM: &str = "import-steam";
+
+/// Événement envoyé au front pour qu'il ouvre la fenêtre d'import Steam
+/// (`STEAM_IMPORT_EVENT` dans src/lib/ipc.ts).
+pub const STEAM_IMPORT_EVENT: &str = "steam-import-requested";
 const QUIT: &str = "quit";
 
 /// Crée l'icône. Appelée une fois, dans le `setup` de `lib.rs`.
@@ -34,6 +39,13 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         app,
         &[
             &MenuItem::with_id(app, SHOW, "Afficher le lanceur", true, None::<&str>)?,
+            &MenuItem::with_id(
+                app,
+                IMPORT_STEAM,
+                "Importer les jeux Steam…",
+                true,
+                None::<&str>,
+            )?,
             &MenuItem::with_id(
                 app,
                 OPEN_CONFIG,
@@ -75,6 +87,12 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
     // `event.id.as_ref()` : l'identifiant en `&str`, pour le comparer à nos constantes.
     match event.id.as_ref() {
         SHOW => window::show(app),
+        // La liste des jeux à cocher est affichée par le front : on montre la
+        // fenêtre, puis on lui demande d'ouvrir l'import.
+        IMPORT_STEAM => {
+            window::show(app);
+            let _ = app.emit(STEAM_IMPORT_EVENT, ());
+        }
         OPEN_CONFIG => {
             if let Err(e) = crate::open_config_dir(app) {
                 eprintln!("dossier de config non ouvert : {e}");

@@ -32,9 +32,15 @@ Pour essayer une version de développement : onglet **Actions** → dernier run 
 Le lanceur a aussi une icône dans la zone de notification (à droite de la barre des tâches, éventuellement sous la flèche `^`) :
 
 - clic gauche : afficher la fenêtre, ou la masquer si elle est devant ;
-- clic droit : *Afficher le lanceur*, *Ouvrir le dossier de config*, *Quitter*.
+- clic droit : *Afficher le lanceur*, *Importer les jeux Steam…*, *Ouvrir le dossier de config*, *Quitter*.
 
 La croix de la fenêtre la masque au lieu de fermer l'app (le raccourci doit rester actif) : pour quitter, passez par *Quitter* dans ce menu.
+
+### Importer les jeux Steam
+
+*Importer mes jeux Steam* (écran d'accueil) ou *Importer les jeux Steam…* (menu de l'icône de notification) liste les jeux installés sur le PC, dans toutes vos bibliothèques Steam (un dossier `SteamLibrary` par disque). Cochez ceux à ajouter : chacun devient une tuile `steam` dans la catégorie « Jeux » (créée si besoin). Les jeux qui ont déjà une tuile sont grisés et jamais ajoutés deux fois.
+
+L'import ne fait qu'*ajouter* des lignes à la fin de `"categories"` et `"tiles"` dans `config.json` : vos tuiles, leur ordre et votre mise en forme restent tels quels, et un fichier invalide n'est jamais modifié. Relancez l'import après avoir installé de nouveaux jeux ; un jeu désinstallé garde sa tuile (supprimez-la à la main si besoin).
 
 ### Lancement au démarrage de Windows
 
@@ -113,7 +119,7 @@ Dans le même dossier que `config.json` :
 ## Limites connues (v0.1.0)
 
 - L'installeur n'est pas signé (avertissement SmartScreen à l'installation).
-- Pas d'éditeur de tuiles dans l'interface, pas d'import automatique de la bibliothèque Steam : ce sont les pistes V2 du [plan](PLAN.md#8-hors-périmètre-v1-pistes-v2).
+- Pas encore d'éditeur de tuiles dans l'interface : c'est une piste V2 du [plan](PLAN.md#8-hors-périmètre-v1-pistes-v2).
 - Si `config.json` est un lien symbolique, ses modifications ne sont pas détectées tout de suite : elles s'appliquent au prochain affichage de la fenêtre.
 
 ## Développer

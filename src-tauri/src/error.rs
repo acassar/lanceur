@@ -69,9 +69,14 @@ pub enum AppError {
     )]
     InvalidUrl(String),
 
-    /// La modification de config.json (favoris) a été annulée avant écriture.
-    #[error("Favoris non enregistrés dans config.json : {0}")]
+    /// La modification de config.json (favoris, import Steam) a été annulée
+    /// avant écriture : le fichier n'a pas été touché.
+    #[error("config.json non modifié : {0}")]
     ConfigWrite(String),
+
+    /// Bibliothèque Steam introuvable ou illisible (import des jeux).
+    #[error("Steam : {0}")]
+    Steam(String),
 
     /// Windows a refusé de lancer la cible (`reason` vient de Windows).
     #[error("Impossible de lancer {target} : {reason}")]
@@ -91,6 +96,7 @@ impl AppError {
             | AppError::UnknownTile(_)
             | AppError::InvalidUrl(_)
             | AppError::ConfigWrite(_)
+            | AppError::Steam(_)
             | AppError::Launch { .. } => None,
             AppError::NotFound(path) => Some(path),
             AppError::Io { path, .. }

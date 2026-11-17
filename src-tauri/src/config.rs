@@ -263,6 +263,32 @@ fn file_stamp(path: &Path) -> Option<(SystemTime, u64)> {
     Some((meta.modified().ok()?, meta.len()))
 }
 
+/// Verrou pris par tout ce qui *réécrit* config.json (favoris, import Steam).
+///
+/// Chacun lit le fichier, le modifie puis l'écrit : sans verrou, deux
+/// modifications simultanées liraient la même version, et la seconde écriture
+/// effacerait la première. Le verrou est relâché quand la valeur renvoyée
+/// (un *guard*) disparaît, à la fin de la fonction appelante.
+pub(crate) fn write_lock() -> std::sync::MutexGuard<'static, ()> {
+    static WRITE_LOCK: Mutex<()> = Mutex::new(());
+    WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Texte de config.json, à modifier puis réécrire. Au premier démarrage, le
+/// fichier est d'abord créé (config sans tuiles).
+pub(crate) fn read_or_create_text(dir: &Path) -> Result<String, AppError> {
+    let path = dir.join(FILE_NAME);
+    match fs::read_to_string(&path) {
+        Ok(text) => Ok(text),
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            load_or_create(dir)?;
+            read(&path)
+        }
+        // Les autres erreurs (encodage, droits…) : même message que `get_config`.
+        Err(_) => read(&path),
+    }
+}
+
 /// Lit le fichier en texte, en convertissant l'erreur éventuelle.
 /// `pub(crate)` : visible dans toute l'app (favorites.rs), mais pas au-delà.
 pub(crate) fn read(path: &Path) -> Result<String, AppError> {

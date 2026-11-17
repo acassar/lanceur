@@ -11,9 +11,12 @@ mod error;
 mod favorites;
 mod fsutil;
 mod icons;
+mod jsontext;
 mod launch;
 mod state;
+mod steam;
 mod tray;
+mod vdf;
 mod watch;
 mod window;
 
@@ -149,6 +152,46 @@ async fn set_favorite(
     tauri::async_runtime::spawn_blocking(move || favorites::set(&dir, &id, favorite))
         .await
         .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
+}
+
+/// Commande `detect_steam_games` : jeux Steam installés sur ce PC, triés par
+/// nom. Ne modifie rien : le front affiche la liste et l'utilisateur choisit.
+///
+/// Séparée de l'import pour être réutilisée ailleurs (écran d'accueil qui
+/// propose de détecter les applications installées).
+#[tauri::command]
+async fn detect_steam_games() -> Result<Vec<steam::SteamGame>, AppError> {
+    // Lecture de fichiers sur plusieurs disques : sur un thread d'attente.
+    tauri::async_runtime::spawn_blocking(steam::detect)
+        .await
+        .unwrap_or_else(|e| Err(AppError::Steam(e.to_string())))
+}
+
+/// Commande `import_steam_games` : `invoke("import_steam_games", { appIds: [730] })`.
+///
+/// Ajoute à config.json une tuile par jeu choisi (ceux qui en ont déjà une
+/// sont ignorés). Tauri convertit `appIds` (camelCase côté JS) en `app_ids`.
+///
+/// Le front n'envoie que des numéros : le nom des jeux est relu par Rust dans
+/// les fichiers de Steam. Seuls des jeux réellement installés peuvent donc
+/// être ajoutés, comme pour `get_icon` où seul l'id de la tuile est transmis.
+#[tauri::command]
+async fn import_steam_games(
+    app: tauri::AppHandle,
+    app_ids: Vec<u32>,
+) -> Result<steam::ImportResult, AppError> {
+    let dir = config::config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        // `into_iter().filter(…).collect()` : comme `games.filter(…)` en JS,
+        // mais en *consommant* la liste d'origine (pas de copie des noms).
+        let chosen: Vec<steam::SteamGame> = steam::detect()?
+            .into_iter()
+            .filter(|g| app_ids.contains(&g.app_id))
+            .collect();
+        steam::import(&dir, &chosen)
+    })
+    .await
+    .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
 }
 
 /// Commande `get_icon` : `invoke("get_icon", { id: "discord" })`.
@@ -304,6 +347,8 @@ pub fn run() {
             get_recents,
             launch,
             set_favorite,
+            detect_steam_games,
+            import_steam_games,
             get_icon,
             open_config_folder,
             hide_window,
