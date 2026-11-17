@@ -1,14 +1,11 @@
-# Compile l'app sur un runner Windows.
-# - Push sur main, PR, ou lancement manuel (Run workflow) : job « build », tests + installeurs
-#   disponibles en artefact du run. Jeton en lecture seule.
-# - Tag v* (ex. v0.1.0) : job « release », qui vérifie que le tag correspond à la version
-#   de l'app puis crée une Release GitHub brouillon. Seul ce job peut écrire dans le repo.
+# Compile l'app sur un runner Windows : push sur main, PR, ou lancement manuel (Run workflow).
+# Tests + installeurs disponibles en artefact du run. Jeton en lecture seule.
+# Les releases sont dans release.yml.
 name: build
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -21,7 +18,6 @@ permissions:
 
 jobs:
   build:
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,46 +51,3 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
 
-  release:
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    runs-on: windows-latest
-    permissions:
-      contents: write # nécessaire pour créer la Release
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Vérifier que le tag correspond à la version de l'app
-        shell: bash
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          npm_version=$(node -p "require('./package.json').version")
-          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
-          echo "tag=$tag package.json=$npm_version Cargo.toml=$cargo_version"
-          if [ "$tag" != "$npm_version" ] || [ "$tag" != "$cargo_version" ]; then
-            echo "::error::Le tag v$tag ne correspond pas aux versions (package.json $npm_version, Cargo.toml $cargo_version)."
-            exit 1
-          fi
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
-
-      - run: npm ci
-      - run: npm test --if-present
-
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Lanceur ${{ github.ref_name }}'
-          releaseDraft: true
-
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
