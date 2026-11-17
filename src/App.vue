@@ -8,6 +8,7 @@ import DetectApps from "./components/DetectApps.vue";
 import HotkeyWarning from "./components/HotkeyWarning.vue";
 import LaunchToast from "./components/LaunchToast.vue";
 import SearchBar from "./components/SearchBar.vue";
+import SettingsDialog from "./components/SettingsDialog.vue";
 import StatusBar from "./components/StatusBar.vue";
 import SteamImport from "./components/SteamImport.vue";
 import TileEditor from "./components/TileEditor.vue";
@@ -109,6 +110,8 @@ onMounted(async () => {
   keep(await ipc.onSteamImportRequested(() => { if (!modalOpen.value) steamImportOpen.value = true; }));
   // « Détecter les applications… » : de même.
   keep(await ipc.onDetectAppsRequested(() => { if (!modalOpen.value) detectOpen.value = true; }));
+  // « Paramètres… » : de même.
+  keep(await ipc.onSettingsRequested(() => openSettings()));
   const stop = await ipc.onWindowShown(() => {
     L.query.value = "";
     L.rail.value = "all";
@@ -185,8 +188,8 @@ function onDetectImported(message: string, added: boolean) {
 // Éditeur de tuiles : `tile` absent pour une nouvelle tuile. La clé force un
 // nouveau formulaire à chaque ouverture.
 const editor = ref<{ key: number; tile?: Tile; category?: string } | null>(null);
-/** Une fenêtre par-dessus (éditeur, détection, import Steam) est ouverte. */
-const modalOpen = computed(() => !!editor.value || detectOpen.value || steamImportOpen.value);
+/** Une fenêtre par-dessus (éditeur, détection, import Steam, paramètres) est ouverte. */
+const modalOpen = computed(() => !!editor.value || detectOpen.value || steamImportOpen.value || settingsOpen.value);
 let editorKey = 0;
 function addTile() {
   if (modalOpen.value) return;
@@ -219,6 +222,23 @@ function onTileDeleted(tile: Tile) {
   closeEditor();
   showToast({ message: `« ${tile.name} » supprimée` });
   load();
+}
+
+// Écran de paramètres (rail, Ctrl+virgule, menu de l'icône de notification,
+// bandeau d'erreur du raccourci).
+const settingsOpen = ref(false);
+function openSettings() {
+  if (!modalOpen.value && L.config.value) settingsOpen.value = true;
+}
+function closeSettings() {
+  settingsOpen.value = false;
+  nextTick(() => searchBar.value?.focus());
+}
+async function onSettingsSaved(error: string | null) {
+  closeSettings();
+  showToast(error ? { message: "Paramètres enregistrés, mais le raccourci n'est pas actif", detail: error, error: true } : { message: "Paramètres enregistrés" });
+  // Comme après l'éditeur : on n'attend pas la surveillance du fichier.
+  await load();
 }
 
 // Glisser-déposer. Pas pendant une recherche : la liste affichée n'est alors
@@ -299,6 +319,9 @@ function onKeydown(e: KeyboardEvent) {
   } else if (e.ctrlKey && e.key.toLowerCase() === "n") {
     e.preventDefault();
     if (!e.repeat && L.config.value) addTile();
+  } else if (e.ctrlKey && e.key === ",") {
+    e.preventDefault();
+    if (!e.repeat) openSettings();
   } else if ((e.ctrlKey && e.key.toLowerCase() === "e") || e.key === "F2") {
     e.preventDefault();
     if (!e.repeat && L.current.value) editTile(L.current.value);
@@ -333,6 +356,7 @@ onMounted(load);
         :tile-count="L.config.value?.tiles.length ?? 0"
         :reorderable="!!L.config.value"
         @add-tile="L.config.value && addTile()"
+        @settings="openSettings"
         @reorder="reorderCategories"
       />
 
@@ -375,7 +399,7 @@ onMounted(load);
       </div>
     </div>
 
-    <HotkeyWarning v-if="hotkeyError" :message="hotkeyError" @open-folder="openConfigFolder" />
+    <HotkeyWarning v-if="hotkeyError" :message="hotkeyError" @settings="L.config.value ? openSettings() : openConfigFolder()" />
     <StatusBar :kind="status.kind" :target="status.target" />
     <TileEditor
       v-if="editor && L.config.value"
@@ -388,6 +412,13 @@ onMounted(load);
       @deleted="onTileDeleted"
     />
     <DetectApps v-if="detectOpen" :config="L.config.value" @close="closeDetect" @imported="onDetectImported" @partial="load" />
+    <SettingsDialog
+      v-if="settingsOpen && L.config.value"
+      :settings="L.config.value.settings"
+      @close="closeSettings"
+      @saved="onSettingsSaved"
+      @open-folder="openConfigFolder"
+    />
     <SteamImport v-if="steamImportOpen" :config="L.config.value" @close="closeSteamImport" @imported="onSteamImported" />
     <LaunchToast :message="toast?.message ?? null" :detail="toast?.detail" :error="toast?.error" />
   </div>

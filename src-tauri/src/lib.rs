@@ -15,12 +15,14 @@ mod fsutil;
 mod icons;
 mod jsontext;
 mod launch;
+mod settings;
 mod state;
 mod steam;
 mod tray;
 mod vdf;
 mod watch;
 mod window;
+mod winkey;
 
 use config::Config;
 use error::AppError;
@@ -80,6 +82,28 @@ fn reload(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<Config, AppEr
     icons::remove_orphans(dir, &config.tiles);
     // Dernière expression sans `;` : c'est la valeur renvoyée par la fonction.
     Ok(config)
+}
+
+/// Commande `update_settings` : `invoke("update_settings", { changes: { hotkey: "Super" } })`.
+///
+/// Écrit les réglages modifiés dans config.json (settings.rs), puis les
+/// applique aussitôt (raccourci, `hideOnBlur`, lancement au démarrage) sans
+/// attendre la surveillance du fichier. Renvoie l'état du raccourci : s'il
+/// est déjà pris par une autre app, l'écran de paramètres l'affiche tout de suite.
+#[tauri::command]
+async fn update_settings(
+    app: tauri::AppHandle,
+    changes: serde_json::Map<String, serde_json::Value>,
+) -> Result<window::HotkeyStatus, AppError> {
+    use tauri::Manager;
+    let dir = config::config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        settings::update(&dir, &changes)?;
+        reload(&app, &dir)?;
+        Ok(app.state::<window::WindowState>().hotkey_status())
+    })
+    .await
+    .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
 }
 
 /// Commande `get_recents` : ids des derniers lancements, du plus récent au
@@ -528,7 +552,8 @@ pub fn run() {
             get_icon,
             open_config_folder,
             hide_window,
-            get_hotkey_status
+            get_hotkey_status,
+            update_settings
         ])
         // `generate_context!` lit tauri.conf.json au moment de la compilation.
         .run(tauri::generate_context!())

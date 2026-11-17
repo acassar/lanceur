@@ -68,3 +68,16 @@ describe("createMockIpc, éditeur", () => {
     expect(config.categories.map((c) => c.id)).toContain("video");
   });
 });
+
+describe("createMockIpc, paramètres", () => {
+  it("garde les réglages modifiés après un rechargement", async () => {
+    const ipc = createMockIpc();
+    await ipc.getConfig();
+    const status = await ipc.updateSettings({ hotkey: "Super", hideOnBlur: false });
+    expect(status).toEqual({ hotkey: "Super", error: null });
+    const cfg = await ipc.getConfig();
+    expect(cfg.settings.hotkey).toBe("Super");
+    expect(cfg.settings.hideOnBlur).toBe(false);
+    await expect(ipc.updateSettings({ hotkey: "F9" })).rejects.toHaveProperty("message");
+  });
+});

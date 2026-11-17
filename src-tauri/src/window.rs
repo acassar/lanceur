@@ -4,7 +4,8 @@
 //! dans la barre des tâches, et un clic dessus restaure la fenêtre.
 //!
 //! Trois façons de faire réapparaître la fenêtre, qui passent toutes par [`show`] :
-//! - le raccourci global (`Win+Alt+Espace` par défaut, réglage `hotkey`) ;
+//! - le raccourci global (`Win+Alt+Espace` par défaut, réglage `hotkey`), ou la
+//!   touche Windows seule (`"hotkey": "Super"`, voir winkey.rs) ;
 //! - relancer l'exe (plugin *single-instance*, branché dans `lib.rs`) ;
 //! - cliquer sur l'icône de la barre des tâches (géré par Windows lui-même) ;
 //! - cliquer sur l'icône de la zone de notification (tray.rs, [`tray_released`]).
@@ -111,8 +112,8 @@ struct TrayClick {
 struct Hotkey {
     /// Texte du raccourci actif, tel qu'écrit dans config.json (`"Super+Alt+Space"`).
     text: String,
-    /// Raccourci réellement enregistré auprès de Windows, s'il y en a un.
-    registered: Option<Shortcut>,
+    /// Déclencheur réellement en place, s'il y en a un.
+    active: Option<Trigger>,
     /// Message à montrer à l'utilisateur si le raccourci n'a pas pu être pris.
     error: Option<String>,
 }
@@ -163,38 +164,17 @@ pub fn sync_settings(app: &AppHandle, settings: &Settings) {
     // code du thread principal, sauf au démarrage, quand rien d'autre ne tourne.
     let _syncing = lock(&state.syncing);
 
-    // Résultat à enregistrer dans l'état : `Ok(Some(..))` nouveau raccourci,
+    // Résultat à enregistrer dans l'état : `Ok(Some(..))` nouveau déclencheur,
     // `Ok(None)` rien à changer, `Err(message)` échec.
-    let outcome = match parse_hotkey(&settings.hotkey) {
+    let outcome = match parse_trigger(&settings.hotkey) {
         Err(message) => Err(message),
         Ok(wanted) => {
             // Le bloc `{ … }` limite la durée du verrou à cette seule lecture.
-            let current = { lock(&state.hotkey).registered };
+            let current = { lock(&state.hotkey).active };
             if current == Some(wanted) {
                 Ok(None)
             } else {
-                // Attention au piège : `register` attend que le thread
-                // principal ait fait le travail. Si on tenait `state.hotkey`
-                // pendant ce temps et que le thread principal voulait le lire
-                // (commande `get_hotkey_status`), chacun attendrait l'autre
-                // pour toujours (*deadlock*). On appelle donc `register` sans
-                // tenir ce verrou.
-                let manager = app.global_shortcut();
-                match manager.register(wanted) {
-                    Ok(()) => {
-                        // Le nouveau est pris : on libère l'ancien.
-                        if let Some(old) = current {
-                            let _ = manager.unregister(old);
-                        }
-                        Ok(Some(wanted))
-                    }
-                    Err(e) => Err(format!(
-                        "Le raccourci « {} » n'a pas pu être enregistré ({e}). \
-                         Il est peut-être déjà utilisé par une autre application : \
-                         choisissez-en un autre dans config.json (réglage hotkey).",
-                        settings.hotkey
-                    )),
-                }
+                activate(app, wanted, current, &settings.hotkey).map(Some)
             }
         }
     };
@@ -202,8 +182,8 @@ pub fn sync_settings(app: &AppHandle, settings: &Settings) {
     let mut hotkey = lock(&state.hotkey);
     match outcome {
         Ok(new) => {
-            if let Some(shortcut) = new {
-                hotkey.registered = Some(shortcut);
+            if let Some(trigger) = new {
+                hotkey.active = Some(trigger);
             }
             hotkey.text = settings.hotkey.clone();
             hotkey.error = None;
@@ -211,6 +191,69 @@ pub fn sync_settings(app: &AppHandle, settings: &Settings) {
         // L'ancien raccourci (et son texte) reste actif.
         Err(message) => hotkey.error = Some(message),
     }
+}
+
+/// Met en place le déclencheur `wanted`, puis retire l'ancien (`current`).
+/// En cas d'échec, l'ancien reste actif et on renvoie le message à afficher.
+///
+/// Attention au piège : `register` attend que le thread principal ait fait le
+/// travail. Si on tenait `state.hotkey` pendant ce temps et que le thread
+/// principal voulait le lire (commande `get_hotkey_status`), chacun attendrait
+/// l'autre pour toujours (*deadlock*). On appelle donc cette fonction sans
+/// tenir ce verrou.
+fn activate(
+    app: &AppHandle,
+    wanted: Trigger,
+    current: Option<Trigger>,
+    text: &str,
+) -> Result<Trigger, String> {
+    let manager = app.global_shortcut();
+    match wanted {
+        Trigger::Combo(shortcut) => manager.register(shortcut).map_err(|e| {
+            format!(
+                "Le raccourci « {text} » n'a pas pu être enregistré ({e}). \
+                 Il est peut-être déjà utilisé par une autre application : \
+                 choisissez-en un autre dans les paramètres."
+            )
+        })?,
+        Trigger::LoneWin => crate::winkey::start(app)
+            .map_err(|e| format!("La touche Windows seule n'a pas pu être surveillée ({e})."))?,
+    }
+    // Le nouveau est en place : on libère l'ancien.
+    match current {
+        Some(Trigger::Combo(old)) => {
+            let _ = manager.unregister(old);
+        }
+        Some(Trigger::LoneWin) => crate::winkey::stop(),
+        None => {}
+    }
+    Ok(wanted)
+}
+
+/// Ce qui affiche ou masque la fenêtre : une combinaison classique, ou la
+/// touche Windows appuyée puis relâchée seule (réglage `"hotkey": "Super"`).
+///
+/// `Copy` : la valeur est petite, on la copie au lieu de la déplacer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trigger {
+    /// Enregistrée auprès de Windows (`RegisterHotKey`, via le plugin).
+    Combo(Shortcut),
+    /// Surveillée par un *hook* clavier (winkey.rs) : Windows ne sait pas
+    /// réserver une touche de modification seule.
+    LoneWin,
+}
+
+/// Textes acceptés pour la touche Windows seule (la casse est ignorée).
+const LONE_WIN: [&str; 3] = ["super", "win", "windows"];
+
+/// Lit le réglage `hotkey` : `"Super"` (touche Windows seule) ou une
+/// combinaison (voir [`parse_hotkey`]).
+pub fn parse_trigger(text: &str) -> Result<Trigger, String> {
+    let trimmed = text.trim();
+    if LONE_WIN.iter().any(|w| trimmed.eq_ignore_ascii_case(w)) {
+        return Ok(Trigger::LoneWin);
+    }
+    parse_hotkey(trimmed).map(Trigger::Combo)
 }
 
 /// Lit un raccourci écrit comme `"Super+Alt+Space"`. Les noms de touches sont
@@ -222,7 +265,7 @@ pub fn sync_settings(app: &AppHandle, settings: &Settings) {
 /// volerait cette touche à toutes les autres applications, jeux compris.
 pub fn parse_hotkey(text: &str) -> Result<Shortcut, String> {
     let shortcut = Shortcut::from_str(text.trim())
-        .map_err(|e| format!("Raccourci « {text} » invalide dans config.json : {e}."))?;
+        .map_err(|e| format!("Raccourci « {text} » invalide : {e}."))?;
     if shortcut.mods.is_empty() {
         return Err(format!(
             "Raccourci « {text} » refusé : ajoutez au moins Ctrl, Alt, Shift ou Super, \
@@ -619,6 +662,19 @@ mod tests {
     fn refuse_une_touche_seule() {
         let err = parse_hotkey("F9").unwrap_err();
         assert!(err.contains("Ctrl"), "{err}");
+    }
+
+    #[test]
+    fn la_touche_windows_seule() {
+        assert_eq!(parse_trigger("Super"), Ok(Trigger::LoneWin));
+        assert_eq!(parse_trigger(" win "), Ok(Trigger::LoneWin));
+        assert_eq!(parse_trigger("WINDOWS"), Ok(Trigger::LoneWin));
+        assert_eq!(
+            parse_trigger("Super+Alt+Space"),
+            Ok(Trigger::Combo(parse_hotkey("Super+Alt+Space").unwrap()))
+        );
+        assert!(parse_trigger("Super+").is_err());
+        assert!(parse_trigger("Alt").is_err());
     }
 
     #[test]

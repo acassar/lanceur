@@ -4,14 +4,14 @@
 // même). Il reste affiché tant que le problème dure : un message éphémère passe
 // trop facilement inaperçu.
 defineProps<{ message: string }>();
-defineEmits<{ openFolder: [] }>();
+defineEmits<{ settings: [] }>();
 </script>
 
 <template>
   <div class="hotkey-warning" role="alert">
     <span class="icon" aria-hidden="true">!</span>
     <p>{{ message }}</p>
-    <button type="button" @click="$emit('openFolder')">Ouvrir le dossier</button>
+    <button type="button" @click="$emit('settings')">Changer le raccourci</button>
   </div>
 </template>
 

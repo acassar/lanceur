@@ -241,6 +241,9 @@ export function createMockIpc(
     async onDetectAppsRequested() {
       return () => {};
     },
+    async onSettingsRequested() {
+      return () => {};
+    },
     // Pas d'extraction d'icônes dans le navigateur : les monogrammes restent.
     async getIcon() {
       return null;
@@ -250,6 +253,14 @@ export function createMockIpc(
     },
     async getHotkeyStatus() {
       return { hotkey: config?.settings.hotkey ?? "Super+Alt+Space", error: null };
+    },
+    async updateSettings(changes) {
+      if (!config) await this.getConfig();
+      if (changes.hotkey !== undefined && !/^(super|win|windows)$|\+/i.test(changes.hotkey.trim())) {
+        throw { message: `config.json non modifié : raccourci « ${changes.hotkey} » refusé` };
+      }
+      edit((c) => Object.assign(c.settings, changes));
+      return { hotkey: config!.settings.hotkey, error: null };
     },
     // Dans un navigateur, la fenêtre ne « réapparaît » jamais.
     async onWindowShown() {

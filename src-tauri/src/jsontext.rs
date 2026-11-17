@@ -223,6 +223,95 @@ pub fn permute_elements(text: &str, key: &str, order: &[usize]) -> Option<String
     Some(out)
 }
 
+/// Donne la valeur `value` (du JSON déjà écrit) au champ `field` de l'objet
+/// `object` de l'objet racine (par exemple `"settings"` → `"hotkey"`).
+///
+/// - Champ présent : seule sa valeur est remplacée, la clé et les blancs autour
+///   restent tels quels.
+/// - Champ absent : il est ajouté après le dernier champ de l'objet, avec le
+///   même retrait (ou sur la même ligne si l'objet tient sur une ligne).
+/// - Objet absent : il est ajouté juste après `"version"`.
+///
+/// Renvoie `None` si le fichier n'a pas la forme attendue (rien n'est alors écrit).
+pub fn set_object_field(text: &str, object: &str, field: &str, value: &str) -> Option<String> {
+    let body = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let root: HashMap<String, &RawValue> = serde_json::from_str(body).ok()?;
+    let nl = newline(text);
+    let multiline = body.trim().contains('\n');
+    let quoted = serde_json::to_string(field).ok()?;
+
+    let (at, end, insert) = match root.get(object) {
+        Some(raw) => {
+            let start = offset(text, raw.get());
+            // Les champs de l'objet, chacun avec sa position dans le texte.
+            let fields: HashMap<String, &RawValue> = serde_json::from_str(raw.get()).ok()?;
+            if let Some(current) = fields.get(field) {
+                // Champ présent : on ne remplace que sa valeur.
+                let at = offset(text, current.get());
+                (at, at + current.get().len(), value.to_string())
+            } else if let Some(last) = fields.values().max_by_key(|v| offset(text, v.get())) {
+                // Champ absent : après la valeur du dernier champ (le plus loin
+                // dans le texte), avant les blancs et le `}` qui restent en place.
+                let last_start = offset(text, last.get());
+                let last_end = last_start + last.get().len();
+                let sep = if raw.get().contains('\n') {
+                    let key = key_start(text, last_start)?;
+                    let own_line = text[line_start(text, key)..key].trim().is_empty();
+                    let indent = match own_line {
+                        true => indent_at(text, key),
+                        false => one_more(&indent_at(text, start)),
+                    };
+                    format!(",{nl}{indent}")
+                } else {
+                    ", ".to_string()
+                };
+                (last_end, last_end, format!("{sep}{quoted}: {value}"))
+            } else {
+                // Objet vide `{}` : on le remplace entièrement.
+                let object = new_object(text, start, &quoted, value, nl, multiline);
+                (start, start + raw.get().len(), object)
+            }
+        }
+        // Objet absent : juste après la valeur de `"version"` (obligatoire).
+        None => {
+            let version = root.get("version")?;
+            let value_pos = offset(text, version.get());
+            let key_pos = key_start(text, value_pos)?;
+            let object_text = new_object(text, key_pos, &quoted, value, nl, multiline);
+            let object_key = serde_json::to_string(object).ok()?;
+            let own_line = text[line_start(text, key_pos)..key_pos].trim().is_empty();
+            let insert = if multiline && own_line {
+                format!(
+                    ",{nl}{}{object_key}: {object_text}",
+                    indent_at(text, key_pos)
+                )
+            } else {
+                format!(", {object_key}: {object_text}")
+            };
+            let end = value_pos + version.get().len();
+            (end, end, insert)
+        }
+    };
+    Some(format!("{}{insert}{}", &text[..at], &text[end..]))
+}
+
+/// Un nouvel objet `{ "field": value }`, pour la clé située sur la ligne de `pos`.
+fn new_object(
+    text: &str,
+    pos: usize,
+    quoted: &str,
+    value: &str,
+    nl: &str,
+    multiline: bool,
+) -> String {
+    if !multiline {
+        return format!("{{ {quoted}: {value} }}");
+    }
+    let outer = indent_at(text, pos);
+    let inner = one_more(&outer);
+    format!("{{{nl}{inner}{quoted}: {value}{nl}{outer}}}")
+}
+
 /// Un nouveau tableau contenant `items`, pour la clé située sur la ligne de `pos`.
 fn new_array(text: &str, pos: usize, items: &[String], nl: &str, multiline: bool) -> String {
     if !multiline {
@@ -346,6 +435,62 @@ mod tests {
             "{\n  \"version\": 1,\n  \"tiles\": [],\n  \"x\": []\n}"
         );
         assert_eq!(remove_element(one, "tiles", 1), None);
+    }
+
+    #[test]
+    fn remplace_la_valeur_d_un_reglage_existant() {
+        let text = "{\r\n  \"version\": 1,\r\n  \"settings\": {\r\n    \"hotkey\": \"Super+Alt+Space\", // pas de commentaire en JSON\r\n    \"hideOnBlur\": true\r\n  }\r\n}";
+        // (le commentaire rend le JSON invalide : on vérifie qu'il est refusé)
+        assert_eq!(
+            set_object_field(text, "settings", "hotkey", "\"Super\""),
+            None
+        );
+
+        let text = "{\r\n  \"version\": 1,\r\n  \"settings\": {\r\n    \"hotkey\" :  \"Super+Alt+Space\",\r\n    \"hideOnBlur\": true\r\n  }\r\n}";
+        let new = set_object_field(text, "settings", "hotkey", "\"Super\"").unwrap();
+        assert_eq!(new, text.replace("\"Super+Alt+Space\"", "\"Super\""));
+        let new = set_object_field(text, "settings", "hideOnBlur", "false").unwrap();
+        assert_eq!(new, text.replace("true", "false"));
+    }
+
+    #[test]
+    fn ajoute_un_reglage_absent_apres_le_dernier() {
+        let text = "{\n\t\"version\": 1,\n\t\"settings\": {\n\t\t\"hotkey\": \"Ctrl+K\"\n\t},\n\t\"tiles\": []\n}";
+        let new = set_object_field(text, "settings", "hideOnBlur", "false").unwrap();
+        assert_eq!(
+            new,
+            "{\n\t\"version\": 1,\n\t\"settings\": {\n\t\t\"hotkey\": \"Ctrl+K\",\n\t\t\"hideOnBlur\": false\n\t},\n\t\"tiles\": []\n}"
+        );
+
+        let compact = "{\"version\":1,\"settings\":{\"hotkey\":\"Ctrl+K\"}}";
+        assert_eq!(
+            set_object_field(compact, "settings", "hideOnBlur", "false").unwrap(),
+            "{\"version\":1,\"settings\":{\"hotkey\":\"Ctrl+K\", \"hideOnBlur\": false}}"
+        );
+    }
+
+    #[test]
+    fn remplit_un_objet_vide_ou_absent() {
+        let text = "{\n  \"version\": 1,\n  \"settings\": {},\n  \"tiles\": []\n}";
+        assert_eq!(
+            set_object_field(text, "settings", "hotkey", "\"Super\"").unwrap(),
+            "{\n  \"version\": 1,\n  \"settings\": {\n    \"hotkey\": \"Super\"\n  },\n  \"tiles\": []\n}"
+        );
+
+        let text = "{\n  \"version\": 1,\n  \"tiles\": []\n}";
+        assert_eq!(
+            set_object_field(text, "settings", "hotkey", "\"Super\"").unwrap(),
+            "{\n  \"version\": 1,\n  \"settings\": {\n    \"hotkey\": \"Super\"\n  },\n  \"tiles\": []\n}"
+        );
+        assert_eq!(
+            set_object_field("{\"version\":1}", "settings", "hotkey", "\"Super\"").unwrap(),
+            "{\"version\":1, \"settings\": { \"hotkey\": \"Super\" }}"
+        );
+        assert_eq!(set_object_field("{}", "settings", "hotkey", "1"), None);
+        assert_eq!(
+            set_object_field("{\"version\":1,\"settings\":[]}", "settings", "hotkey", "1"),
+            None
+        );
     }
 
     #[test]
