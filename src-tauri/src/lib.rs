@@ -7,6 +7,7 @@
 
 mod autostart;
 mod config;
+mod editor;
 mod error;
 mod favorites;
 mod fsutil;
@@ -152,6 +153,101 @@ async fn set_favorite(
     tauri::async_runtime::spawn_blocking(move || favorites::set(&dir, &id, favorite))
         .await
         .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
+}
+
+/// Commande `add_tile` : ajoute une tuile créée dans la fenêtre (éditeur).
+///
+/// Tauri convertit l'objet JS `draft` en `editor::TileDraft` grâce à
+/// `Deserialize` : un champ manquant ou mal typé rejette la promesse côté JS.
+/// Renvoie la tuile créée, avec l'id choisi par Rust.
+#[tauri::command]
+async fn add_tile(
+    app: tauri::AppHandle,
+    draft: editor::TileDraft,
+) -> Result<config::Tile, AppError> {
+    let dir = config::config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        // `std::slice::from_ref` : une liste d'un seul élément, sans copie.
+        let mut added = editor::add_tiles(&dir, std::slice::from_ref(&draft))?;
+        // `add_tiles` renvoie une tuile par brouillon : ici, exactement une.
+        added
+            .pop()
+            .ok_or_else(|| AppError::ConfigWrite("aucune tuile ajoutée".into()))
+    })
+    .await
+    .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
+}
+
+/// Commande `update_tile` : remplace la tuile `id` (même id) par `draft`.
+#[tauri::command]
+async fn update_tile(
+    app: tauri::AppHandle,
+    id: String,
+    draft: editor::TileDraft,
+) -> Result<config::Tile, AppError> {
+    let dir = config::config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || editor::update_tile(&dir, &id, &draft))
+        .await
+        .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
+}
+
+/// Commande `delete_tile` : supprime la tuile `id` (et son favori).
+#[tauri::command]
+async fn delete_tile(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    let dir = config::config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || editor::delete_tile(&dir, &id))
+        .await
+        .unwrap_or_else(|e| Err(AppError::ConfigWrite(e.to_string())))
+}
+
+/// Commande `pick_file` : ouvre la boîte « Ouvrir » de Windows et renvoie le
+/// chemin choisi (`None` si l'utilisateur annule). `images` : filtre sur les
+/// images (icône) au lieu des programmes.
+///
+/// La boîte est ouverte côté Rust (plugin dialog) : le front n'a pas besoin
+/// de permission pour accéder aux fichiers, il ne reçoit qu'un chemin.
+#[tauri::command]
+async fn pick_file(app: tauri::AppHandle, images: bool) -> Option<String> {
+    use tauri::Manager;
+    use tauri_plugin_dialog::DialogExt;
+
+    // Pendant que la boîte est ouverte, notre fenêtre n'est plus au premier
+    // plan : sans cela, `hideOnBlur` la réduirait.
+    window::set_native_dialog_open(&app, true);
+    let mut dialog = app.dialog().file().set_title(if images {
+        "Choisir une image"
+    } else {
+        "Choisir un programme ou un raccourci"
+    });
+    dialog = if images {
+        dialog.add_filter(
+            "Images",
+            &["png", "jpg", "jpeg", "ico", "bmp", "gif", "webp"],
+        )
+    } else {
+        dialog
+            .add_filter(
+                "Programmes et raccourcis",
+                &["exe", "lnk", "bat", "cmd", "url"],
+            )
+            .add_filter("Tous les fichiers", &["*"])
+    };
+    // `set_parent` : la boîte est rattachée à notre fenêtre (au-dessus d'elle).
+    if let Some(main) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&main);
+    }
+    // `blocking_pick_file` attend la réponse de l'utilisateur : sur un thread
+    // d'attente, jamais sur le thread principal (la fenêtre figerait).
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_file())
+        .await
+        .ok()
+        .flatten();
+    window::set_native_dialog_open(&app, false);
+    // `into_path` : le chemin Windows (`C:\…`) ; `to_string_lossy` le
+    // convertit en texte (les rares caractères non convertibles deviennent `?`).
+    picked
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Commande `detect_steam_games` : jeux Steam installés sur ce PC, triés par
@@ -301,6 +397,8 @@ pub fn run() {
             }
         }))
         .plugin(window::shortcut_plugin())
+        // Boîte « Ouvrir » de Windows, pour choisir un programme (éditeur de tuiles).
+        .plugin(tauri_plugin_dialog::init())
         // `manage` confie une valeur à Tauri ; on la retrouve ensuite avec
         // `app.state::<WindowState>()` ou un paramètre `State<…>` de commande.
         .manage(window::WindowState::default())
@@ -349,6 +447,10 @@ pub fn run() {
             get_recents,
             launch,
             set_favorite,
+            add_tile,
+            update_tile,
+            delete_tile,
+            pick_file,
             detect_steam_games,
             import_steam_games,
             get_icon,

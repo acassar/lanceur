@@ -52,3 +52,19 @@ describe("createMockIpc, favoris", () => {
     expect(await ipc.setFavorite("bg3", false)).toEqual(favorites);
   });
 });
+
+describe("createMockIpc, éditeur", () => {
+  it("ajoute, modifie et supprime, et garde les changements au rechargement", async () => {
+    const ipc = createMockIpc();
+    await ipc.getConfig();
+    const tile = await ipc.addTile({ name: "Twitch", category: "", newCategory: "Vidéo", type: "web", url: "https://twitch.tv" });
+    expect(tile.category).toBe("video");
+    await ipc.updateTile(tile.id, { name: "Twitch TV", category: "web", type: "web", url: "https://twitch.tv" });
+    await ipc.deleteTile("cs2");
+    const config = await ipc.getConfig();
+    expect(config.tiles[config.tiles.length - 1]).toMatchObject({ id: tile.id, name: "Twitch TV", category: "web" });
+    expect(config.tiles.some((t) => t.id === "cs2")).toBe(false);
+    expect(config.favorites).not.toContain("cs2");
+    expect(config.categories.map((c) => c.id)).toContain("video");
+  });
+});

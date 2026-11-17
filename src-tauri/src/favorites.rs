@@ -108,7 +108,7 @@ struct Spans<'a> {
 
 /// Renvoie `text` avec `"favorites"` remplacé par `ids`, ou `None` si la
 /// structure du fichier n'est pas celle attendue.
-fn set_favorites(text: &str, ids: &[String]) -> Option<String> {
+pub(crate) fn set_favorites(text: &str, ids: &[String]) -> Option<String> {
     // Même traitement du BOM que `config::parse`. `body` est un morceau de
     // `text` : les positions calculées plus bas restent valables dans `text`.
     let body = text.strip_prefix('\u{feff}').unwrap_or(text);

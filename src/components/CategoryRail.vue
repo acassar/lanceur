@@ -2,6 +2,7 @@
 import type { RailItem, RailKey } from "../composables/useLauncher";
 
 defineProps<{ items: RailItem[]; tileCount: number }>();
+defineEmits<{ addTile: [] }>();
 const active = defineModel<RailKey>({ required: true });
 </script>
 
@@ -17,6 +18,7 @@ const active = defineModel<RailKey>({ required: true });
     >
       {{ item.label }}<span>{{ item.count }}</span>
     </button>
+    <button type="button" tabindex="-1" class="add" title="Ajouter une tuile (Ctrl+N)" @click="$emit('addTile')">+ Ajouter une tuile</button>
     <div class="foot">config.json<br />{{ tileCount }} tuiles</div>
   </nav>
 </template>
@@ -37,5 +39,7 @@ button {
 button span { font: 11px var(--font-mono); color: var(--faint); }
 button:hover { background: var(--surface); color: var(--fg); }
 button[aria-current="true"] { background: var(--surface-2); color: var(--fg); box-shadow: inset 2px 0 0 var(--accent); }
-.foot { margin-top: auto; padding: 8px 10px 0; font-size: 11px; color: var(--faint); line-height: 1.5; }
+.add { margin-top: auto; color: var(--faint); }
+.add:hover { color: var(--accent); }
+.foot { padding: 8px 10px 0; font-size: 11px; color: var(--faint); line-height: 1.5; }
 </style>

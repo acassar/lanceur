@@ -5,7 +5,7 @@
 // Il propose aussi d'importer d'un clic les jeux Steam installés.
 import { ref } from "vue";
 
-const emit = defineEmits<{ openFolder: []; copyFailed: []; importSteam: [] }>();
+const emit = defineEmits<{ openFolder: []; copyFailed: []; importSteam: []; addTile: [] }>();
 
 /**
  * Exemple à coller dans config.json à la place des trois listes vides : trois
@@ -49,9 +49,13 @@ async function copy() {
       <p>Vos jeux Steam installés peuvent être ajoutés automatiquement.</p>
       <button type="button" class="primary" @click="$emit('importSteam')">Importer mes jeux Steam</button>
     </div>
+    <div class="steam">
+      <p>Un programme, un raccourci ou un site : ajoutez-le depuis la fenêtre.</p>
+      <button type="button" class="primary" @click="$emit('addTile')">Ajouter une tuile</button>
+    </div>
     <p>
-      Pour le reste, le lanceur affiche les applications listées dans <code>config.json</code>.
-      Ajoutez vos programmes, sites et autres jeux dans ce fichier :
+      Vous pouvez aussi éditer à la main <code>config.json</code>, où le lanceur range ses tuiles
+      (utile pour en ajouter beaucoup d'un coup) :
     </p>
     <p class="path"><code>%APPDATA%\io.github.acassar.lanceur\config.json</code></p>
     <ol>

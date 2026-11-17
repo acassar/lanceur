@@ -490,7 +490,7 @@ fn unknown_tile_fields(text: &str) -> Vec<String> {
 }
 
 /// Ids de catégorie réservés par l'interface (entrées du rail, sections).
-const RESERVED_CATEGORY_IDS: &[&str] = &["all", "favorites", "recents", "results"];
+pub(crate) const RESERVED_CATEGORY_IDS: &[&str] = &["all", "favorites", "recents", "results"];
 
 /// Un id valide : minuscules, chiffres, `-` et `_`. Il sert de nom de fichier
 /// pour le cache d'icônes (étape 6), d'où cette règle stricte.
@@ -499,6 +499,54 @@ fn is_valid_id(id: &str) -> bool {
         && id
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+/// Longueur maximale d'un id tiré d'un nom (jeu Steam, tuile, catégorie).
+pub(crate) const MAX_SLUG: usize = 40;
+
+/// Id tiré d'un nom : minuscules sans accents, chiffres et `-`, la règle des
+/// ids de config.json (`Baldur's Gate 3` -> `baldurs-gate-3`). Utilisé par
+/// l'import Steam et l'éditeur de tuiles. Peut renvoyer une chaîne vide.
+pub(crate) fn slug(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars() {
+        let folded = fold(c);
+        if !folded.is_empty() {
+            out.push_str(folded);
+        } else if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if matches!(c, '\'' | '’' | '®' | '™' | '©') {
+            // Apostrophes et marques : supprimées (« Baldur's » -> « baldurs »).
+        } else if !out.ends_with('-') {
+            // Tout le reste (espaces, ponctuation, autres alphabets) : un `-`.
+            out.push('-');
+        }
+    }
+    let mut out = out.trim_matches('-').to_string();
+    if out.len() > MAX_SLUG {
+        // Que de l'ASCII : couper à un octet précis est sans risque.
+        out.truncate(MAX_SLUG);
+        out = out.trim_end_matches('-').to_string();
+    }
+    out
+}
+
+/// Lettre accentuée -> lettres sans accent (vide si `c` n'en est pas une).
+fn fold(c: char) -> &'static str {
+    match c.to_lowercase().next().unwrap_or(c) {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => "a",
+        'æ' => "ae",
+        'ç' => "c",
+        'è' | 'é' | 'ê' | 'ë' => "e",
+        'ì' | 'í' | 'î' | 'ï' => "i",
+        'ñ' => "n",
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => "o",
+        'œ' => "oe",
+        'ù' | 'ú' | 'û' | 'ü' => "u",
+        'ý' | 'ÿ' => "y",
+        'ß' => "ss",
+        _ => "",
+    }
 }
 
 /// Vérifie ce que serde ne peut pas vérifier seul. Renvoie la liste des

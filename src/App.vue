@@ -9,6 +9,7 @@ import LaunchToast from "./components/LaunchToast.vue";
 import SearchBar from "./components/SearchBar.vue";
 import StatusBar from "./components/StatusBar.vue";
 import SteamImport from "./components/SteamImport.vue";
+import TileEditor from "./components/TileEditor.vue";
 import TileSection from "./components/TileSection.vue";
 import WelcomeScreen from "./components/WelcomeScreen.vue";
 import { useKeyboardNav, type Direction } from "./composables/useKeyboardNav";
@@ -16,7 +17,7 @@ import { useLauncher } from "./composables/useLauncher";
 import { ipc, toIpcError } from "./lib/ipc";
 import { importMessage } from "./lib/steam";
 import { kindLabel, targetText } from "./lib/tiles";
-import type { SteamImportResult } from "./lib/types";
+import type { SteamImportResult, Tile } from "./lib/types";
 
 const L = useLauncher();
 const scroller = ref<HTMLElement | null>(null);
@@ -84,7 +85,8 @@ onMounted(async () => {
   // et laisse la dernière config valide à l'écran.
   keep(await ipc.onConfigChanged(() => load()));
   // Menu de l'icône de notification : « Importer les jeux Steam… ».
-  keep(await ipc.onSteamImportRequested(() => (steamImportOpen.value = true)));
+  // Ignoré si l'éditeur de tuiles est ouvert (une seule fenêtre à la fois).
+  keep(await ipc.onSteamImportRequested(() => (steamImportOpen.value = !editor.value)));
   const stop = await ipc.onWindowShown(() => {
     L.query.value = "";
     L.rail.value = "all";
@@ -146,6 +148,43 @@ function onSteamImported(result: SteamImportResult) {
   if (result.added.length > 0) load();
 }
 
+// Éditeur de tuiles : `tile` absent pour une nouvelle tuile. La clé force un
+// nouveau formulaire à chaque ouverture.
+const editor = ref<{ key: number; tile?: Tile; category?: string } | null>(null);
+let editorKey = 0;
+function addTile() {
+  if (steamImportOpen.value) return;
+  // Nouvelle tuile rangée par défaut dans la catégorie affichée.
+  editor.value = { key: ++editorKey, category: L.rail.value };
+}
+function editTile(tile: Tile) {
+  if (steamImportOpen.value) return;
+  editor.value = { key: ++editorKey, tile };
+}
+function closeEditor() {
+  editor.value = null;
+  nextTick(() => searchBar.value?.focus());
+}
+async function onTileSaved(tile: Tile, added: boolean) {
+  closeEditor();
+  showToast({ message: added ? `« ${tile.name} » ajoutée` : `« ${tile.name} » enregistrée` });
+  // Comme après l'import Steam : on n'attend pas la surveillance du fichier.
+  await load();
+  // Une nouvelle tuile est sélectionnée (et visible), pour la lancer aussitôt.
+  if (added && !L.query.value.trim()) {
+    const i = L.flat.value.findIndex((t) => t.id === tile.id);
+    if (i >= 0) {
+      L.selected.value = i;
+      nextTick(reveal);
+    }
+  }
+}
+function onTileDeleted(tile: Tile) {
+  closeEditor();
+  showToast({ message: `« ${tile.name} » supprimée` });
+  load();
+}
+
 const ARROWS: Record<string, Direction> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
 function onKeydown(e: KeyboardEvent) {
@@ -174,6 +213,12 @@ function onKeydown(e: KeyboardEvent) {
   } else if (e.ctrlKey && e.key.toLowerCase() === "d") {
     e.preventDefault();
     if (!e.repeat && L.current.value) toggleFavorite(L.current.value.id);
+  } else if (e.ctrlKey && e.key.toLowerCase() === "n") {
+    e.preventDefault();
+    if (!e.repeat && L.config.value) addTile();
+  } else if ((e.ctrlKey && e.key.toLowerCase() === "e") || e.key === "F2") {
+    e.preventDefault();
+    if (!e.repeat && L.current.value) editTile(L.current.value);
   }
 }
 
@@ -199,7 +244,12 @@ onMounted(load);
     <SearchBar ref="searchBar" v-model="L.query.value" :count="L.railItems.value[0]?.count ?? 0" :total="L.config.value?.tiles.length ?? 0" />
 
     <div class="body">
-      <CategoryRail v-model="L.rail.value" :items="L.railItems.value" :tile-count="L.config.value?.tiles.length ?? 0" />
+      <CategoryRail
+        v-model="L.rail.value"
+        :items="L.railItems.value"
+        :tile-count="L.config.value?.tiles.length ?? 0"
+        @add-tile="L.config.value && addTile()"
+      />
 
       <div ref="scroller" class="scroll">
         <ConfigError
@@ -214,13 +264,14 @@ onMounted(load);
           @open-folder="openConfigFolder"
           @copy-failed="showToast({ message: 'Impossible de copier l’exemple', error: true })"
           @import-steam="steamImportOpen = true"
+          @add-tile="addTile"
         />
         <p v-else-if="L.config.value && L.sections.value.length === 0" class="empty">
           <template v-if="L.query.value.trim()">Aucune tuile pour <strong>« {{ L.query.value.trim() }} »</strong>.</template>
           <template v-else-if="L.rail.value === 'favorites'">Aucun favori pour l'instant. Sélectionnez une tuile et appuyez sur <kbd>Ctrl</kbd> <kbd>D</kbd>.</template>
           <template v-else>Cette catégorie est vide.</template>
-          <br />Ajoutez des tuiles dans <code>config.json</code>
-          (<a href="#" @click.prevent="openConfigFolder">ouvrir le dossier</a>).
+          <br /><a href="#" @click.prevent="addTile">Ajouter une tuile</a> (<kbd>Ctrl</kbd> <kbd>N</kbd>)
+          ou éditer <code>config.json</code> (<a href="#" @click.prevent="openConfigFolder">ouvrir le dossier</a>).
         </p>
         <TileSection
           v-for="section in L.sections.value"
@@ -232,12 +283,23 @@ onMounted(load);
           @launch="launch"
           @hover="(i) => (L.selected.value = i)"
           @toggle-favorite="toggleFavorite"
+          @edit="editTile"
         />
       </div>
     </div>
 
     <HotkeyWarning v-if="hotkeyError" :message="hotkeyError" @open-folder="openConfigFolder" />
     <StatusBar :kind="status.kind" :target="status.target" />
+    <TileEditor
+      v-if="editor && L.config.value"
+      :key="editor.key"
+      :tile="editor.tile"
+      :categories="L.config.value.categories"
+      :category="editor.category"
+      @close="closeEditor"
+      @saved="onTileSaved"
+      @deleted="onTileDeleted"
+    />
     <SteamImport v-if="steamImportOpen" :config="L.config.value" @close="closeSteamImport" @imported="onSteamImported" />
     <LaunchToast :message="toast?.message ?? null" :detail="toast?.detail" :error="toast?.error" />
   </div>

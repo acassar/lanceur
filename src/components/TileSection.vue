@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { Section } from "../composables/useLauncher";
+import type { Tile } from "../lib/types";
 import TileButton from "./TileButton.vue";
 
 defineProps<{ section: Section; selected: number; favorites: Set<string>; query: string }>();
-const emit = defineEmits<{ launch: [index: number]; hover: [index: number]; toggleFavorite: [id: string] }>();
+const emit = defineEmits<{ launch: [index: number]; hover: [index: number]; toggleFavorite: [id: string]; edit: [tile: Tile] }>();
 </script>
 
 <template>
@@ -22,6 +23,7 @@ const emit = defineEmits<{ launch: [index: number]; hover: [index: number]; togg
         @launch="emit('launch', item.index)"
         @hover="emit('hover', item.index)"
         @toggle-favorite="emit('toggleFavorite', item.tile.id)"
+        @edit="emit('edit', item.tile)"
       />
     </div>
   </section>
