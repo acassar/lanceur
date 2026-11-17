@@ -12,7 +12,7 @@ const props = defineProps<{
   compact: boolean;
   query: string;
 }>();
-const emit = defineEmits<{ launch: []; hover: []; toggleFavorite: [] }>();
+const emit = defineEmits<{ launch: []; hover: []; toggleFavorite: []; edit: [] }>();
 const segments = computed(() => highlight(props.tile.name, props.query));
 </script>
 
@@ -25,6 +25,7 @@ const segments = computed(() => highlight(props.tile.name, props.query));
     :data-index="index"
     @mousemove="emit('hover')"
     @click="emit('launch')"
+    @contextmenu.prevent="emit('edit')"
   >
     <TileIcon :tile="tile" />
     <span class="name"
@@ -33,6 +34,11 @@ const segments = computed(() => highlight(props.tile.name, props.query));
         ><template v-else>{{ s.text }}</template></template
       ></span
     >
+    <span v-if="!compact" class="edit" title="Modifier la tuile (Ctrl+E ou clic droit)" @click.stop="emit('edit')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" />
+      </svg>
+    </span>
     <span
       v-if="!compact"
       class="star"
@@ -68,13 +74,14 @@ mark { background: none; color: var(--accent); }
 .compact :deep(.badge) { display: none; }
 .compact :deep(.face) { border-radius: 8px; }
 
-.star {
+.star, .edit {
   position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 6px;
   display: grid; place-items: center; color: var(--faint); opacity: 0; transition: opacity 0.12s;
 }
-.star svg { width: 13px; height: 13px; }
-.star:hover { color: var(--fg); background: var(--surface); }
-.tile:hover .star, .tile.sel .star, .star.on { opacity: 1; }
+.edit { right: auto; left: 4px; }
+.star svg, .edit svg { width: 13px; height: 13px; }
+.star:hover, .edit:hover { color: var(--fg); background: var(--surface); }
+.tile:hover .star, .tile.sel .star, .star.on, .tile:hover .edit, .tile.sel .edit { opacity: 1; }
 .star.on { color: var(--accent); }
 .star.on svg { fill: currentColor; }
 </style>

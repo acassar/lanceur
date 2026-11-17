@@ -29,6 +29,9 @@ serde_path_to_error = "0.1"
 # unique (relancer l'exe réaffiche la fenêtre déjà ouverte).
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
+# V2 (éditeur de tuiles) : boîte « Ouvrir » de Windows, appelée depuis Rust
+# uniquement (aucune permission donnée au front).
+tauri-plugin-dialog = "2"
 # Étape 6 (icônes) :
 # - `reqwest` : client HTTP *async*, pour télécharger les favicons et les
 #   jaquettes Steam. Sous Windows, il utilise le TLS du système (SChannel).

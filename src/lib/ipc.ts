@@ -3,7 +3,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { SAMPLE, createMockIpc } from "./ipc.mock";
-import type { Config, SteamGame, SteamImportResult } from "./types";
+import type { Config, SteamGame, SteamImportResult, Tile, TileDraft } from "./types";
 
 export interface Ipc {
   getConfig(): Promise<Config>;
@@ -15,6 +15,20 @@ export interface Ipc {
    * config.json et renvoie la nouvelle liste. Répéter l'appel ne change rien.
    */
   setFavorite(id: string, favorite: boolean): Promise<string[]>;
+  /**
+   * Ajoute une tuile à la fin de config.json (en dernier dans sa catégorie,
+   * créée si `newCategory` est rempli). Renvoie la tuile avec l'id choisi.
+   */
+  addTile(draft: TileDraft): Promise<Tile>;
+  /** Remplace la tuile `id` (l'id ne change pas). Renvoie la tuile enregistrée. */
+  updateTile(id: string, draft: TileDraft): Promise<Tile>;
+  /** Supprime la tuile `id` de config.json, et de ses favoris. */
+  deleteTile(id: string): Promise<void>;
+  /**
+   * Ouvre la boîte « Ouvrir » de Windows : un programme/raccourci, ou une image
+   * si `images`. Renvoie le chemin choisi, ou `null` si annulé.
+   */
+  pickFile(images: boolean): Promise<string | null>;
   /** Jeux Steam installés sur ce PC, triés par nom. Ne modifie rien. */
   detectSteamGames(): Promise<SteamGame[]>;
   /**
@@ -92,6 +106,10 @@ function createTauriIpc(): Ipc {
     getRecents: () => invoke<string[]>("get_recents"),
     launch: (id) => invoke<string[]>("launch", { id }),
     setFavorite: (id, favorite) => invoke<string[]>("set_favorite", { id, favorite }),
+    addTile: (draft) => invoke<Tile>("add_tile", { draft }),
+    updateTile: (id, draft) => invoke<Tile>("update_tile", { id, draft }),
+    deleteTile: (id) => invoke("delete_tile", { id }),
+    pickFile: (images) => invoke<string | null>("pick_file", { images }),
     detectSteamGames: () => invoke<SteamGame[]>("detect_steam_games"),
     importSteamGames: (appIds) => invoke<SteamImportResult>("import_steam_games", { appIds }),
     getIcon: (id) => invoke<string | null>("get_icon", { id }),

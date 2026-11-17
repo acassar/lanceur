@@ -60,3 +60,21 @@ export interface SteamImportResult {
   /** Nom de la catégorie où elles ont été rangées. */
   category: string;
 }
+
+/**
+ * Tuile envoyée par l'éditeur aux commandes `add_tile` / `update_tile`
+ * (`TileDraft` dans editor.rs) : tout sauf l'id, que Rust choisit à l'ajout
+ * à partir du nom, et garde à la modification.
+ */
+export type TileDraft = {
+  name: string;
+  /** Id d'une catégorie existante (ignoré si `newCategory` est rempli). */
+  category: string;
+  /** Nom d'une catégorie à créer (réutilisée si ce nom existe déjà). */
+  newCategory?: string;
+  icon?: string;
+} & (
+  | { type: "steam"; appId: number }
+  | { type: "app"; path: string; args: string[] }
+  | { type: "web"; url: string }
+);

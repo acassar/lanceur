@@ -23,6 +23,8 @@ Pour essayer une version de développement : onglet **Actions** → dernier run 
 | flèches | se déplacer dans la grille |
 | `Tab` / `Maj+Tab` | catégorie suivante / précédente |
 | `Ctrl+D` (ou l'étoile) | ajouter / retirer des favoris |
+| `Ctrl+N` | ajouter une tuile |
+| `Ctrl+E` ou `F2` (ou clic droit, ou le crayon) | modifier ou supprimer la tuile |
 | `Échap` | vider la recherche, puis masquer la fenêtre |
 
 « Masquer » réduit la fenêtre : l'icône reste dans la barre des tâches, un clic la rouvre. Relancer l'exe réaffiche la fenêtre existante au lieu d'en ouvrir une deuxième.
@@ -35,6 +37,14 @@ Le lanceur a aussi une icône dans la zone de notification (à droite de la barr
 - clic droit : *Afficher le lanceur*, *Importer les jeux Steam…*, *Ouvrir le dossier de config*, *Quitter*.
 
 La croix de la fenêtre la masque au lieu de fermer l'app (le raccourci doit rester actif) : pour quitter, passez par *Quitter* dans ce menu.
+
+### Ajouter, modifier, supprimer une tuile
+
+*+ Ajouter une tuile* (en bas du rail) ou `Ctrl+N` ouvre un formulaire : type (application, app web, jeu Steam), nom, programme (bouton *Parcourir…*, `.exe` ou `.lnk`), adresse ou appId (l'adresse de la page du magasin Steam marche aussi), catégorie (existante ou nouvelle) et icône facultative. La nouvelle tuile se range en dernier dans sa catégorie.
+
+Un clic droit sur une tuile (ou le crayon au survol, `Ctrl+E`, `F2`) ouvre le même formulaire pour la modifier ; *Supprimer*, puis *Confirmer la suppression*, la retire (et de vos favoris). Les catégories ne sont jamais supprimées.
+
+Comme pour les favoris, seules les lignes concernées de `config.json` changent : une tuile ajoutée ou modifiée est écrite sur une ligne, le reste du fichier (ordre, lignes vides, mise en forme) ne bouge pas, et un fichier invalide n'est jamais modifié. L'id d'une nouvelle tuile est tiré de son nom ; il ne change plus ensuite.
 
 ### Importer les jeux Steam
 

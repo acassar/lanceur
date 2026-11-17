@@ -4,7 +4,7 @@
 //
 // Dans l'app (Tauri), ipc.ts utilise les vraies commandes Rust à la place.
 import type { Ipc } from "./ipc";
-import type { Category, Config, SteamGame, Tile } from "./types";
+import type { Category, Config, SteamGame, Tile, TileDraft } from "./types";
 
 export const SAMPLE: Config = {
   version: 1,
@@ -84,6 +84,25 @@ export function createMockIpc(
   // config d'exemple, elle, repart de zéro à chaque `loadConfig`).
   let importedCategory: Category | null = null;
   const importedTiles: Tile[] = [];
+  // Modifications faites dans l'éditeur, réappliquées de même à chaque rechargement.
+  const edits: ((c: Config) => void)[] = [];
+  function edit(change: (c: Config) => void) {
+    edits.push(change);
+    if (config) change(config);
+  }
+  function categoryOf(c: Config, draft: TileDraft): string {
+    const name = draft.newCategory?.trim();
+    if (!name) return draft.category;
+    const found = c.categories.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    if (found) return found.id;
+    const id = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "categorie";
+    c.categories.push({ id, name });
+    return id;
+  }
+  function tileOf(id: string, category: string, draft: TileDraft): Tile {
+    const { newCategory: _, ...rest } = draft;
+    return { ...rest, id, category } as Tile;
+  }
 
   return {
     async getConfig() {
@@ -92,6 +111,7 @@ export function createMockIpc(
         config.categories.push(importedCategory);
       }
       config.tiles.push(...importedTiles.filter((t) => !config?.tiles.some((u) => u.id === t.id)));
+      for (const change of edits) change(config);
       // On ignore les récents qui ne correspondent à aucune tuile de cette config.
       const ids = new Set(config.tiles.map((t) => t.id));
       recents = recents.filter((id) => ids.has(id));
@@ -113,6 +133,40 @@ export function createMockIpc(
       if (favorite && !has) config.favorites.push(id);
       if (!favorite && has) config.favorites = config.favorites.filter((f) => f !== id);
       return [...config.favorites];
+    },
+    async addTile(draft) {
+      const tile = tileOf(`tuile-${Date.now()}`, "", draft);
+      edit((c) => {
+        if (c.tiles.some((t) => t.id === tile.id)) return;
+        tile.category = categoryOf(c, draft);
+        c.tiles.push({ ...tile });
+      });
+      console.info("[ipc mock] add_tile", tile);
+      return { ...tile };
+    },
+    async updateTile(id, draft) {
+      if (!config?.tiles.some((t) => t.id === id)) throw new Error(`Tuile inconnue : ${id}`);
+      let saved: Tile | undefined;
+      edit((c) => {
+        const i = c.tiles.findIndex((t) => t.id === id);
+        if (i < 0) return;
+        const tile = tileOf(id, categoryOf(c, draft), draft);
+        // Changement de catégorie : la tuile passe en dernier, comme dans editor.rs.
+        if (tile.category === c.tiles[i].category) c.tiles[i] = tile;
+        else c.tiles.push(...c.tiles.splice(i, 1).map(() => tile));
+        saved = tile;
+      });
+      return { ...saved! };
+    },
+    async deleteTile(id) {
+      if (!config?.tiles.some((t) => t.id === id)) throw new Error(`Tuile inconnue : ${id}`);
+      edit((c) => {
+        c.tiles = c.tiles.filter((t) => t.id !== id);
+        c.favorites = c.favorites.filter((f) => f !== id);
+      });
+    },
+    async pickFile(images) {
+      return images ? null : "C:\\Program Files\\Exemple\\Exemple.exe";
     },
     async detectSteamGames() {
       return structuredClone(SAMPLE_STEAM_GAMES);

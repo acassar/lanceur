@@ -23,7 +23,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{self, Category, Config, Target, Tile};
+use crate::config::{self, Category, Config, Target, Tile, slug};
+use crate::editor::{category_json, tile_json};
 use crate::error::AppError;
 use crate::fsutil;
 use crate::jsontext;
@@ -332,84 +333,10 @@ fn unique_id(name: &str, app_id: u32, taken: &mut HashSet<String>) -> String {
     id
 }
 
-/// Longueur maximale d'un id tiré d'un nom de jeu.
-const MAX_SLUG: usize = 40;
-
-/// Minuscules sans accents, chiffres et `-` : la règle des ids de config.json.
-fn slug(name: &str) -> String {
-    let mut out = String::new();
-    for c in name.chars() {
-        let folded = fold(c);
-        if !folded.is_empty() {
-            out.push_str(folded);
-        } else if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_lowercase());
-        } else if matches!(c, '\'' | '’' | '®' | '™' | '©') {
-            // Apostrophes et marques : supprimées (« Baldur's » -> « baldurs »).
-        } else if !out.ends_with('-') {
-            // Tout le reste (espaces, ponctuation, autres alphabets) : un `-`.
-            out.push('-');
-        }
-    }
-    let mut out = out.trim_matches('-').to_string();
-    if out.len() > MAX_SLUG {
-        // Que de l'ASCII : couper à un octet précis est sans risque.
-        out.truncate(MAX_SLUG);
-        out = out.trim_end_matches('-').to_string();
-    }
-    out
-}
-
-/// Lettre accentuée -> lettres sans accent (vide si `c` n'en est pas une).
-fn fold(c: char) -> &'static str {
-    match c.to_lowercase().next().unwrap_or(c) {
-        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => "a",
-        'æ' => "ae",
-        'ç' => "c",
-        'è' | 'é' | 'ê' | 'ë' => "e",
-        'ì' | 'í' | 'î' | 'ï' => "i",
-        'ñ' => "n",
-        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => "o",
-        'œ' => "oe",
-        'ù' | 'ú' | 'û' | 'ü' => "u",
-        'ý' | 'ÿ' => "y",
-        'ß' => "ss",
-        _ => "",
-    }
-}
-
-/// Une catégorie sur une ligne, dans le style de la config d'exemple.
-fn category_json(c: &Category) -> String {
-    format!(
-        "{{ \"id\": {}, \"name\": {} }}",
-        quote(&c.id),
-        quote(&c.name)
-    )
-}
-
-/// Une tuile Steam sur une ligne, dans le style de la config d'exemple.
-fn tile_json(t: &Tile) -> String {
-    let app_id = match t.target {
-        Target::Steam { app_id } => app_id,
-        // `plan` ne crée que des tuiles Steam.
-        _ => unreachable!("l'import Steam ne crée que des tuiles steam"),
-    };
-    format!(
-        "{{ \"id\": {}, \"name\": {}, \"category\": {}, \"type\": \"steam\", \"appId\": {app_id} }}",
-        quote(&t.id),
-        quote(&t.name),
-        quote(&t.category)
-    )
-}
-
-/// Texte JSON entre guillemets (avec les échappements nécessaires).
-fn quote(s: &str) -> String {
-    serde_json::to_string(s).expect("une chaîne est toujours sérialisable")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::MAX_SLUG;
 
     const DEFAULT: &str = include_str!("../config.default.json");
     const EXAMPLE: &str = include_str!("../config.example.json");

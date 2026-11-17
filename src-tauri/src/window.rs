@@ -72,6 +72,18 @@ pub struct WindowState {
 
     /// Clics sur l'icône de notification (voir [`tray_pressed`]).
     tray: Mutex<TrayClick>,
+
+    /// Une boîte de dialogue Windows (« Ouvrir ») est ouverte au-dessus de la
+    /// fenêtre : la perte de focus est alors normale, on ne réduit pas.
+    native_dialog: AtomicBool,
+}
+
+/// Signale l'ouverture (`true`) ou la fermeture (`false`) d'une boîte de
+/// dialogue Windows, pendant laquelle `hideOnBlur` est suspendu.
+pub fn set_native_dialog_open(app: &AppHandle, open: bool) {
+    app.state::<WindowState>()
+        .native_dialog
+        .store(open, Ordering::Relaxed);
 }
 
 #[derive(Default)]
@@ -426,8 +438,12 @@ fn hide_after_blur(app: AppHandle) {
                 .state::<WindowState>()
                 .hide_on_blur
                 .load(Ordering::Relaxed);
+            let dialog = handle
+                .state::<WindowState>()
+                .native_dialog
+                .load(Ordering::Relaxed);
             let minimized = window.is_minimized().unwrap_or(true);
-            if !enabled || minimized {
+            if !enabled || dialog || minimized {
                 return;
             }
             if is_in_front(&window) {

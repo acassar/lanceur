@@ -6,8 +6,9 @@
 //! réécrire, on repère *où* se trouve un tableau dans le texte, et on ne change
 //! que ce morceau ; tout le reste est recopié octet pour octet.
 //!
-//! Utilisé par favorites.rs (remplacer `"favorites"`) et steam.rs (ajouter des
-//! éléments à la fin de `"categories"` et de `"tiles"`).
+//! Utilisé par favorites.rs (remplacer `"favorites"`), steam.rs (ajouter des
+//! éléments à la fin de `"categories"` et de `"tiles"`) et editor.rs
+//! (ajouter, remplacer ou retirer une tuile).
 
 use std::collections::HashMap;
 
@@ -150,6 +151,52 @@ pub fn append_to_array(text: &str, key: &str, items: &[String]) -> Option<String
     Some(format!("{}{insert}{}", &text[..at], &text[end..]))
 }
 
+/// Positions (début, fin) des éléments du tableau `key` de l'objet racine.
+/// `None` si le fichier n'a pas la forme attendue ou si le tableau manque.
+fn element_spans(text: &str, key: &str) -> Option<Vec<(usize, usize)>> {
+    let body = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let root: HashMap<String, &RawValue> = serde_json::from_str(body).ok()?;
+    let elements: Vec<&RawValue> = serde_json::from_str(root.get(key)?.get()).ok()?;
+    Some(
+        elements
+            .iter()
+            .map(|e| {
+                let start = offset(text, e.get());
+                (start, start + e.get().len())
+            })
+            .collect(),
+    )
+}
+
+/// Remplace l'élément n°`index` du tableau `key` par `item` (du JSON déjà
+/// écrit). Tout le reste du fichier, y compris les blancs autour de
+/// l'élément, est recopié tel quel.
+pub fn replace_element(text: &str, key: &str, index: usize, item: &str) -> Option<String> {
+    let (start, end) = *element_spans(text, key)?.get(index)?;
+    Some(format!("{}{item}{}", &text[..start], &text[end..]))
+}
+
+/// Retire l'élément n°`index` du tableau `key`, avec la virgule et les blancs
+/// qui le séparent de son voisin. Le dernier élément retiré laisse `[]`.
+pub fn remove_element(text: &str, key: &str, index: usize) -> Option<String> {
+    let spans = element_spans(text, key)?;
+    let (start, end) = *spans.get(index)?;
+    let (cut_start, cut_end) = match (index.checked_sub(1), spans.get(index + 1)) {
+        // Pas le premier : on retire depuis la fin du précédent (sa virgule,
+        // le saut de ligne et le retrait qui suivent) jusqu'à la fin de celui-ci.
+        (Some(prev), _) => (spans[prev].1, end),
+        // Le premier, suivi d'un autre : de son début au début du suivant.
+        (None, Some(&(next, _))) => (start, next),
+        // Le seul : le tableau devient `[]`.
+        (None, None) => {
+            let open = text[..start].rfind('[')?;
+            let close = end + text[end..].find(']')?;
+            return Some(format!("{}[]{}", &text[..open], &text[close + 1..]));
+        }
+    };
+    Some(format!("{}{}", &text[..cut_start], &text[cut_end..]))
+}
+
 /// Un nouveau tableau contenant `items`, pour la clé située sur la ligne de `pos`.
 fn new_array(text: &str, pos: usize, items: &[String], nl: &str, multiline: bool) -> String {
     if !multiline {
@@ -239,5 +286,39 @@ mod tests {
         let value = text.find('1').unwrap();
         assert_eq!(key_start(text, value), Some(2));
         assert_eq!(key_start("[1]", 1), None);
+    }
+
+    #[test]
+    fn remplace_un_element_sans_toucher_au_reste() {
+        let text =
+            "{\n  \"version\": 1,\n  \"tiles\": [\n    { \"a\": 1 },\n\n    { \"b\": 2 }\n  ]\n}";
+        let new = replace_element(text, "tiles", 1, "{ \"c\": 3 }").unwrap();
+        assert_eq!(new, text.replace("{ \"b\": 2 }", "{ \"c\": 3 }"));
+        assert_eq!(replace_element(text, "tiles", 2, "1"), None);
+        assert_eq!(replace_element(text, "absent", 0, "1"), None);
+    }
+
+    #[test]
+    fn retire_un_element_et_sa_virgule() {
+        let text =
+            "{\r\n  \"version\": 1,\r\n  \"tiles\": [\r\n    1,\r\n    2,\r\n    3\r\n  ]\r\n}";
+        let middle = remove_element(text, "tiles", 1).unwrap();
+        assert_eq!(middle, text.replace("    2,\r\n", ""));
+        let first = remove_element(text, "tiles", 0).unwrap();
+        assert_eq!(first, text.replace("    1,\r\n", ""));
+        let last = remove_element(text, "tiles", 2).unwrap();
+        assert_eq!(last, text.replace(",\r\n    3", ""));
+
+        let compact = "{\"version\":1,\"tiles\":[1, 2]}";
+        assert_eq!(
+            remove_element(compact, "tiles", 0).unwrap(),
+            "{\"version\":1,\"tiles\":[2]}"
+        );
+        let one = "{\n  \"version\": 1,\n  \"tiles\": [\n    { \"a\": [1] }\n  ],\n  \"x\": []\n}";
+        assert_eq!(
+            remove_element(one, "tiles", 0).unwrap(),
+            "{\n  \"version\": 1,\n  \"tiles\": [],\n  \"x\": []\n}"
+        );
+        assert_eq!(remove_element(one, "tiles", 1), None);
     }
 }
