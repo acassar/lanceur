@@ -556,8 +556,15 @@ fn write_default(dir: &Path, path: &Path) -> Result<(), AppError> {
     };
     // `|source| …` est une *closure* : une fonction anonyme, comme une fonction
     // fléchée JS. Elle *emprunte* `path` (lecture seule) pour construire l'erreur.
-    file.write_all(DEFAULT.as_bytes())
-        .map_err(|source| create_error(path, source))?;
+    if let Err(source) = file.write_all(DEFAULT.as_bytes()) {
+        // Écriture interrompue (disque plein…) : on supprime le fichier à
+        // moitié écrit, sinon il ne serait jamais recréé (`create_new`
+        // tomberait sur `AlreadyExists`). `drop` ferme le fichier avant, ce
+        // que Windows exige pour le supprimer ; `let _ =` ignore un échec ici.
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(create_error(path, source));
+    }
     Ok(()) // `()` : « rien », l'équivalent de `void`
 }
 

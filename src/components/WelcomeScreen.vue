@@ -57,7 +57,7 @@ async function copy() {
       <button type="button" class="primary" @click="$emit('openFolder')">Ouvrir le dossier</button>
       <button type="button" @click="copy">{{ copied ? "Copié" : "Copier l'exemple" }}</button>
     </div>
-    <pre class="snippet">{{ SNIPPET }}</pre>
+    <pre class="snippet selectable">{{ SNIPPET }}</pre>
     <p class="hint">
       Enregistrez : les tuiles apparaissent aussitôt, sans redémarrer.
       Pour un jeu Steam, l'<code>appId</code> est le nombre dans l'adresse de sa page du magasin.
@@ -80,6 +80,7 @@ code { font: 12px var(--font-mono); color: var(--fg); }
   margin: 0 0 10px; padding: 10px 12px; overflow-x: auto;
   background: var(--win); border: 1px solid var(--line); border-radius: 7px;
   font: 12px/1.5 var(--font-mono); color: var(--fg);
+  user-select: text; cursor: text;
 }
 .hint { margin: 0; font-size: 12.5px; }
 .actions { display: flex; gap: 8px; margin: 0 0 10px; }

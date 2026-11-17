@@ -12,7 +12,7 @@ defineEmits<{ retry: []; openFolder: [] }>();
     <p class="title">
       {{ compact ? "La nouvelle configuration est invalide : la précédente reste affichée." : "Impossible de lire la configuration." }}
     </p>
-    <pre class="message">{{ error.message }}</pre>
+    <pre class="message selectable">{{ error.message }}</pre>
     <p v-if="error.path" class="path"><code>{{ error.path }}</code></p>
     <div class="actions">
       <button type="button" @click="$emit('openFolder')">Ouvrir le dossier</button>
@@ -32,6 +32,7 @@ defineEmits<{ retry: []; openFolder: [] }>();
 .message {
   margin: 0; white-space: pre-wrap; word-break: break-word;
   font: 12.5px/1.5 var(--font-mono); color: var(--fg);
+  user-select: text; cursor: text;
 }
 .path { margin: 8px 0 0; }
 .path code { font: 12px var(--font-mono); color: var(--muted); word-break: break-all; }

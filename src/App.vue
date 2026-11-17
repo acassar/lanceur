@@ -53,6 +53,9 @@ watch(L.rail, () => searchBar.value?.focus(false));
 function keepSearchFocus(e: MouseEvent) {
   const el = e.target as HTMLElement;
   if (el === searchBar.value?.input) return;
+  // Texte qu'on peut vouloir sélectionner pour le copier (exemple de l'écran
+  // d'accueil, message d'erreur) : on laisse faire la sélection.
+  if (el.closest(".selectable")) return;
   // Clic sur la barre de défilement de la grille : on laisse faire le glisser.
   if (el === scroller.value && e.offsetX >= el.clientWidth) return;
   e.preventDefault();
