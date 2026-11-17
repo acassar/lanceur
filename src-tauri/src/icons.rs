@@ -686,14 +686,14 @@ pub fn find_local_cover(steam_dir: &Path, app_id: u32) -> Option<PathBuf> {
 /// Dossier d'installation de Steam, lu dans le registre (valeur `SteamPath`),
 /// avec le dossier par défaut en secours.
 #[cfg(windows)]
-fn steam_dir() -> Option<PathBuf> {
+pub(crate) fn steam_dir() -> Option<PathBuf> {
     win32::steam_path_from_registry()
         .or_else(|| Some(PathBuf::from(r"C:\Program Files (x86)\Steam")))
         .filter(|p| p.is_dir())
 }
 
 #[cfg(not(windows))]
-fn steam_dir() -> Option<PathBuf> {
+pub(crate) fn steam_dir() -> Option<PathBuf> {
     None
 }
 

@@ -8,12 +8,15 @@ import HotkeyWarning from "./components/HotkeyWarning.vue";
 import LaunchToast from "./components/LaunchToast.vue";
 import SearchBar from "./components/SearchBar.vue";
 import StatusBar from "./components/StatusBar.vue";
+import SteamImport from "./components/SteamImport.vue";
 import TileSection from "./components/TileSection.vue";
 import WelcomeScreen from "./components/WelcomeScreen.vue";
 import { useKeyboardNav, type Direction } from "./composables/useKeyboardNav";
 import { useLauncher } from "./composables/useLauncher";
 import { ipc, toIpcError } from "./lib/ipc";
+import { importMessage } from "./lib/steam";
 import { kindLabel, targetText } from "./lib/tiles";
+import type { SteamImportResult } from "./lib/types";
 
 const L = useLauncher();
 const scroller = ref<HTMLElement | null>(null);
@@ -80,6 +83,8 @@ onMounted(async () => {
   // suite, même si la fenêtre est réduite. Un JSON invalide affiche l'erreur
   // et laisse la dernière config valide à l'écran.
   keep(await ipc.onConfigChanged(() => load()));
+  // Menu de l'icône de notification : « Importer les jeux Steam… ».
+  keep(await ipc.onSteamImportRequested(() => (steamImportOpen.value = true)));
   const stop = await ipc.onWindowShown(() => {
     L.query.value = "";
     L.rail.value = "all";
@@ -124,6 +129,21 @@ async function toggleFavorite(id: string) {
   } catch (e) {
     showToast({ message: "Favori non enregistré", detail: toIpcError(e).message, error: true });
   }
+}
+
+// Fenêtre d'import Steam (écran d'accueil ou menu de l'icône de notification).
+const steamImportOpen = ref(false);
+function closeSteamImport() {
+  steamImportOpen.value = false;
+  // Le reste de la fenêtre redevient actif : le clavier retourne à la recherche.
+  nextTick(() => searchBar.value?.focus());
+}
+function onSteamImported(result: SteamImportResult) {
+  closeSteamImport();
+  showToast({ message: importMessage(result) });
+  // config.json vient d'être réécrit : la surveillance du fichier rechargerait
+  // aussi la config, mais on n'attend pas son délai.
+  if (result.added.length > 0) load();
 }
 
 const ARROWS: Record<string, Direction> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
@@ -193,6 +213,7 @@ onMounted(load);
           v-if="L.config.value && L.config.value.tiles.length === 0"
           @open-folder="openConfigFolder"
           @copy-failed="showToast({ message: 'Impossible de copier l’exemple', error: true })"
+          @import-steam="steamImportOpen = true"
         />
         <p v-else-if="L.config.value && L.sections.value.length === 0" class="empty">
           <template v-if="L.query.value.trim()">Aucune tuile pour <strong>« {{ L.query.value.trim() }} »</strong>.</template>
@@ -217,6 +238,7 @@ onMounted(load);
 
     <HotkeyWarning v-if="hotkeyError" :message="hotkeyError" @open-folder="openConfigFolder" />
     <StatusBar :kind="status.kind" :target="status.target" />
+    <SteamImport v-if="steamImportOpen" :config="L.config.value" @close="closeSteamImport" @imported="onSteamImported" />
     <LaunchToast :message="toast?.message ?? null" :detail="toast?.detail" :error="toast?.error" />
   </div>
 </template>

@@ -15,11 +15,11 @@
 //! 3. remplacer le tableau dans le texte (ou l'ajouter s'il n'existe pas) ;
 //! 4. revalider le nouveau texte, par sécurité ;
 //! 5. l'écrire de façon atomique (`fsutil::write_atomic`).
+//!
+//! Les outils de repérage dans le texte sont partagés avec l'import Steam
+//! (jsontext.rs).
 
-use std::fs;
-use std::io::ErrorKind;
 use std::path::Path;
-use std::sync::Mutex;
 
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -27,10 +27,7 @@ use serde_json::value::RawValue;
 use crate::config;
 use crate::error::AppError;
 use crate::fsutil;
-
-/// Verrou : deux clics très rapprochés ne doivent pas lire le même fichier
-/// puis l'écrire chacun de leur côté (le second effacerait le premier).
-static WRITE_LOCK: Mutex<()> = Mutex::new(());
+use crate::jsontext::{indent_at, key_start, line_start, newline, offset, one_more};
 
 /// Met `id` en favori (`favorite = true`, ajouté à la fin) ou l'en retire.
 /// Renvoie la nouvelle liste, que le front affiche aussitôt.
@@ -40,22 +37,13 @@ static WRITE_LOCK: Mutex<()> = Mutex::new(());
 /// à la main pendant que la fenêtre est ouverte, ne peuvent donc pas faire
 /// l'inverse de ce que l'utilisateur voit. Répéter le même appel ne change rien.
 pub fn set(dir: &Path, id: &str, favorite: bool) -> Result<Vec<String>, AppError> {
-    let _guard = WRITE_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Deux clics très rapprochés (ou un favori pendant un import Steam) ne
+    // doivent pas lire le même fichier puis l'écrire chacun de leur côté.
+    let _guard = config::write_lock();
 
     let path = dir.join(config::FILE_NAME);
     // On a besoin du *texte* du fichier : c'est lui qu'on va modifier.
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        // Premier démarrage : on crée la config d'exemple, puis on la lit.
-        Err(e) if e.kind() == ErrorKind::NotFound => {
-            config::load_or_create(dir)?;
-            config::read(&path)?
-        }
-        // Les autres erreurs (encodage, droits…) : même message que `get_config`.
-        Err(_) => config::read(&path)?,
-    };
+    let text = config::read_or_create_text(dir)?;
     let config = config::parse(&text, &path)?;
 
     if !config.tiles.iter().any(|t| t.id == id) {
@@ -125,8 +113,7 @@ fn set_favorites(text: &str, ids: &[String]) -> Option<String> {
     // `text` : les positions calculées plus bas restent valables dans `text`.
     let body = text.strip_prefix('\u{feff}').unwrap_or(text);
     let spans: Spans = serde_json::from_str(body).ok()?;
-    // Fins de ligne du fichier : `\r\n` s'il a été écrit sous Windows.
-    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let nl = newline(text);
 
     let (start, end, replacement) = match spans.favorites {
         // Cas courant : on remplace le tableau existant, en gardant son style
@@ -157,12 +144,6 @@ fn set_favorites(text: &str, ids: &[String]) -> Option<String> {
     Some(format!("{}{replacement}{}", &text[..start], &text[end..]))
 }
 
-/// Position (en octets) de `part` dans `text`. `part` doit être un morceau de
-/// `text` (ce que garantit `RawValue` emprunté) : on soustrait leurs adresses.
-fn offset(text: &str, part: &str) -> usize {
-    part.as_ptr() as usize - text.as_ptr() as usize
-}
-
 /// Écrit le tableau JSON des ids, dans le style de l'ancien tableau `old`.
 fn format_array(text: &str, start: usize, old: &str, ids: &[String], nl: &str) -> String {
     // `serde_json::to_string` met les guillemets (et échapperait au besoin).
@@ -189,47 +170,10 @@ fn format_array(text: &str, start: usize, old: &str, ids: &[String], nl: &str) -
         // Position du premier élément dans `text` : `start` + sa place dans `old`.
         indent_at(text, start + old.len() - first.len())
     } else {
-        format!("{outer}  ")
+        one_more(&outer)
     };
     let lines: Vec<String> = quoted.iter().map(|q| format!("{inner}{q}")).collect();
     format!("[{nl}{}{nl}{outer}]", lines.join(&format!(",{nl}")))
-}
-
-/// Début de la ligne qui contient la position `pos`.
-fn line_start(text: &str, pos: usize) -> usize {
-    // `rfind` cherche depuis la fin ; `map(|i| i + 1)` saute le `\n` trouvé.
-    text[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0)
-}
-
-/// Retrait (espaces et tabulations) au début de la ligne qui contient `pos`.
-fn indent_at(text: &str, pos: usize) -> String {
-    let line = &text[line_start(text, pos)..];
-    let len = line.len() - line.trim_start_matches([' ', '\t']).len();
-    line[..len].to_string()
-}
-
-/// Position du `"` ouvrant de la clé dont la valeur commence en `value`.
-/// Entre la clé et la valeur, le JSON n'autorise que des espaces et un `:`.
-fn key_start(text: &str, value: usize) -> Option<usize> {
-    let before = text[..value].trim_end().strip_suffix(':')?.trim_end();
-    // `before` se termine par le `"` fermant de la clé : on cherche le `"`
-    // ouvrant, en sautant les `\"` (guillemets échappés dans la clé).
-    let mut end = before.len().checked_sub(1)?;
-    if !before[end..].starts_with('"') {
-        return None;
-    }
-    loop {
-        let quote = before[..end].rfind('"')?;
-        let backslashes = before[..quote]
-            .bytes()
-            .rev()
-            .take_while(|&b| b == b'\\')
-            .count();
-        if backslashes % 2 == 0 {
-            return Some(quote);
-        }
-        end = quote;
-    }
 }
 
 #[cfg(test)]
@@ -359,13 +303,5 @@ mod tests {
             Err(AppError::Json { .. })
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), broken);
-    }
-
-    #[test]
-    fn retrouve_la_cle_avant_la_valeur() {
-        let text = r#"{ "a\"b" : 1 }"#;
-        let value = text.find('1').unwrap();
-        assert_eq!(key_start(text, value), Some(2));
-        assert_eq!(key_start("[1]", 1), None);
     }
 }

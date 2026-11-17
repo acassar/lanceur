@@ -2,9 +2,10 @@
 // Écran d'accueil affiché tant que config.json ne contient aucune tuile (premier
 // démarrage). Il explique où est le fichier et donne un exemple à copier ; le
 // fichier étant relu dès qu'il est enregistré, les tuiles apparaissent aussitôt.
+// Il propose aussi d'importer d'un clic les jeux Steam installés.
 import { ref } from "vue";
 
-const emit = defineEmits<{ openFolder: []; copyFailed: [] }>();
+const emit = defineEmits<{ openFolder: []; copyFailed: []; importSteam: [] }>();
 
 /**
  * Exemple à coller dans config.json à la place des trois listes vides : trois
@@ -44,9 +45,13 @@ async function copy() {
 <template>
   <section class="welcome" aria-labelledby="welcome-title">
     <h2 id="welcome-title">Aucune tuile pour l'instant</h2>
+    <div class="steam">
+      <p>Vos jeux Steam installés peuvent être ajoutés automatiquement.</p>
+      <button type="button" class="primary" @click="$emit('importSteam')">Importer mes jeux Steam</button>
+    </div>
     <p>
-      Le lanceur affiche les applications listées dans <code>config.json</code>.
-      Ajoutez vos jeux Steam, programmes et sites dans ce fichier :
+      Pour le reste, le lanceur affiche les applications listées dans <code>config.json</code>.
+      Ajoutez vos programmes, sites et autres jeux dans ce fichier :
     </p>
     <p class="path"><code>%APPDATA%\io.github.acassar.lanceur\config.json</code></p>
     <ol>
@@ -83,6 +88,13 @@ code { font: 12px var(--font-mono); color: var(--fg); }
   user-select: text; cursor: text;
 }
 .hint { margin: 0; font-size: 12.5px; }
+.steam {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0 0 12px; padding: 10px 12px;
+  background: var(--win); border: 1px solid var(--line); border-radius: 7px;
+}
+.steam p { margin: 0; color: var(--fg); }
+.steam button { flex: none; }
 .actions { display: flex; gap: 8px; margin: 0 0 10px; }
 button {
   font: inherit; font-size: 13px; color: var(--fg); cursor: pointer;

@@ -46,3 +46,17 @@ export interface Config {
   favorites: string[];
   tiles: Tile[];
 }
+
+/** Jeu Steam installé, trouvé par la commande Rust `detect_steam_games` (steam.rs). */
+export interface SteamGame {
+  appId: number;
+  name: string;
+}
+
+/** Résultat de la commande `import_steam_games`. */
+export interface SteamImportResult {
+  /** Ids des tuiles ajoutées (vide si tous les jeux avaient déjà une tuile). */
+  added: string[];
+  /** Nom de la catégorie où elles ont été rangées. */
+  category: string;
+}

@@ -3,7 +3,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { SAMPLE, createMockIpc } from "./ipc.mock";
-import type { Config } from "./types";
+import type { Config, SteamGame, SteamImportResult } from "./types";
 
 export interface Ipc {
   getConfig(): Promise<Config>;
@@ -15,6 +15,13 @@ export interface Ipc {
    * config.json et renvoie la nouvelle liste. Répéter l'appel ne change rien.
    */
   setFavorite(id: string, favorite: boolean): Promise<string[]>;
+  /** Jeux Steam installés sur ce PC, triés par nom. Ne modifie rien. */
+  detectSteamGames(): Promise<SteamGame[]>;
+  /**
+   * Ajoute à config.json une tuile par jeu choisi (dans la catégorie « Jeux »,
+   * créée si besoin). Les jeux qui ont déjà une tuile sont ignorés.
+   */
+  importSteamGames(appIds: number[]): Promise<SteamImportResult>;
   /**
    * Icône de la tuile en `data:` URL (PNG ou JPEG), ou `null` si aucune n'a
    * été trouvée (on garde alors le monogramme). Mise en cache côté Rust.
@@ -34,6 +41,11 @@ export interface Ipc {
    * (surveillé par Rust, voir watch.rs). Renvoie une fonction qui arrête l'écoute.
    */
   onConfigChanged(callback: () => void): Promise<() => void>;
+  /**
+   * Appelle `callback` quand l'entrée « Importer les jeux Steam… » du menu de
+   * l'icône de notification est choisie. Renvoie une fonction qui arrête l'écoute.
+   */
+  onSteamImportRequested(callback: () => void): Promise<() => void>;
   /** Ouvre le dossier de config.json dans l'Explorateur. */
   openConfigFolder(): Promise<void>;
 }
@@ -43,6 +55,9 @@ export const WINDOW_SHOWN_EVENT = "window-shown";
 
 /** Événement émis par Rust quand config.json change (`CONFIG_CHANGED_EVENT` dans watch.rs). */
 export const CONFIG_CHANGED_EVENT = "config-changed";
+
+/** Événement émis par le menu de l'icône de notification (`STEAM_IMPORT_EVENT` dans tray.rs). */
+export const STEAM_IMPORT_EVENT = "steam-import-requested";
 
 /** Miroir de `HotkeyStatus` dans window.rs. */
 export interface HotkeyStatus {
@@ -77,11 +92,14 @@ function createTauriIpc(): Ipc {
     getRecents: () => invoke<string[]>("get_recents"),
     launch: (id) => invoke<string[]>("launch", { id }),
     setFavorite: (id, favorite) => invoke<string[]>("set_favorite", { id, favorite }),
+    detectSteamGames: () => invoke<SteamGame[]>("detect_steam_games"),
+    importSteamGames: (appIds) => invoke<SteamImportResult>("import_steam_games", { appIds }),
     getIcon: (id) => invoke<string | null>("get_icon", { id }),
     hideWindow: () => invoke("hide_window"),
     getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
     onWindowShown: (callback) => listen(WINDOW_SHOWN_EVENT, () => callback()),
     onConfigChanged: (callback) => listen(CONFIG_CHANGED_EVENT, () => callback()),
+    onSteamImportRequested: (callback) => listen(STEAM_IMPORT_EVENT, () => callback()),
     openConfigFolder: () => invoke("open_config_folder"),
   };
 }

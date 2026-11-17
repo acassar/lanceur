@@ -4,7 +4,7 @@
 //
 // Dans l'app (Tauri), ipc.ts utilise les vraies commandes Rust à la place.
 import type { Ipc } from "./ipc";
-import type { Config } from "./types";
+import type { Category, Config, SteamGame, Tile } from "./types";
 
 export const SAMPLE: Config = {
   version: 1,
@@ -59,6 +59,16 @@ export const SAMPLE: Config = {
   ],
 };
 
+/** Jeux « installés » simulés : certains ont déjà une tuile dans SAMPLE. */
+export const SAMPLE_STEAM_GAMES: SteamGame[] = [
+  { appId: 1086940, name: "Baldur's Gate 3" },
+  { appId: 730, name: "Counter-Strike 2" },
+  { appId: 1091520, name: "Cyberpunk 2077" },
+  { appId: 1145350, name: "Hades II" },
+  { appId: 620, name: "Portal 2" },
+  { appId: 413150, name: "Stardew Valley" },
+];
+
 /**
  * @param loadConfig d'où vient la config : les données d'exemple par défaut
  *   (les tests en passent une autre).
@@ -70,10 +80,18 @@ export function createMockIpc(
 ): Omit<Ipc, "openConfigFolder"> {
   let config: Config | null = null;
   let recents = initialRecents;
+  // Ajouts de l'import Steam simulé, réappliqués à chaque rechargement (la
+  // config d'exemple, elle, repart de zéro à chaque `loadConfig`).
+  let importedCategory: Category | null = null;
+  const importedTiles: Tile[] = [];
 
   return {
     async getConfig() {
       config = await loadConfig();
+      if (importedCategory && !config.categories.some((c) => c.id === importedCategory?.id)) {
+        config.categories.push(importedCategory);
+      }
+      config.tiles.push(...importedTiles.filter((t) => !config?.tiles.some((u) => u.id === t.id)));
       // On ignore les récents qui ne correspondent à aucune tuile de cette config.
       const ids = new Set(config.tiles.map((t) => t.id));
       recents = recents.filter((id) => ids.has(id));
@@ -95,6 +113,27 @@ export function createMockIpc(
       if (favorite && !has) config.favorites.push(id);
       if (!favorite && has) config.favorites = config.favorites.filter((f) => f !== id);
       return [...config.favorites];
+    },
+    async detectSteamGames() {
+      return structuredClone(SAMPLE_STEAM_GAMES);
+    },
+    async importSteamGames(appIds) {
+      const cfg = config ?? (await this.getConfig());
+      const category =
+        cfg.categories.find((c) => c.id === "jeux") ?? (importedCategory = { id: "jeux", name: "Jeux" });
+      if (!cfg.categories.includes(category)) cfg.categories.push(category);
+      const known = new Set(cfg.tiles.flatMap((t) => (t.type === "steam" ? [t.appId] : [])));
+      const added: string[] = [];
+      for (const game of SAMPLE_STEAM_GAMES.filter((g) => appIds.includes(g.appId) && !known.has(g.appId))) {
+        const tile: Tile = { id: `steam-${game.appId}`, name: game.name, category: category.id, type: "steam", appId: game.appId };
+        importedTiles.push(tile);
+        cfg.tiles.push(tile);
+        added.push(tile.id);
+      }
+      return { added, category: category.name };
+    },
+    async onSteamImportRequested() {
+      return () => {};
     },
     // Pas d'extraction d'icônes dans le navigateur : les monogrammes restent.
     async getIcon() {
