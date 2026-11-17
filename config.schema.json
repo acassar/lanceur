@@ -72,6 +72,11 @@
           "maximum": 4294967295,
           "default": 4,
           "description": "Nombre de tuiles dans la section Récents (0 pour la masquer)."
+        },
+        "launchAtStartup": {
+          "type": "boolean",
+          "default": false,
+          "description": "Lancer l'app à l'ouverture de session Windows, fenêtre cachée (icône dans la zone de notification ; le raccourci l'ouvre)."
         }
       }
     },

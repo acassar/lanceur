@@ -7,7 +7,8 @@
     "hideOnBlur": true,
     "accent": "#f0a35e",
     "browser": "msedge",
-    "recentsCount": 4
+    "recentsCount": 4,
+    "launchAtStartup": false
   },
   "categories": [],
   "favorites": [],

@@ -19,7 +19,7 @@ describe("createMockIpc", () => {
     const ipc = createMockIpc(
       async () => ({
         version: 1,
-        settings: { hotkey: "", hideAfterLaunch: true, hideOnBlur: true, accent: "#fff", browser: "msedge", recentsCount: 4 },
+        settings: { hotkey: "", hideAfterLaunch: true, hideOnBlur: true, accent: "#fff", browser: "msedge", recentsCount: 4, launchAtStartup: false },
         categories: [{ id: "c", name: "C" }],
         favorites: [],
         tiles: [{ id: "a", name: "A", category: "c", type: "web", url: "https://a" }],

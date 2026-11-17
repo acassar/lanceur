@@ -5,6 +5,7 @@
 //! fichier existe dès qu'il est là ; en Rust, il faut le déclarer).
 //! `use config::Config;` est ensuite l'équivalent d'un `import { Config }`.
 
+mod autostart;
 mod config;
 mod error;
 mod favorites;
@@ -12,12 +13,12 @@ mod fsutil;
 mod icons;
 mod launch;
 mod state;
+mod tray;
 mod watch;
 mod window;
 
 use config::Config;
 use error::AppError;
-use tauri::Manager;
 
 /// Commande `get_config` : le front l'appelle avec `invoke("get_config")`.
 ///
@@ -68,6 +69,8 @@ fn reload(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<Config, AppEr
     // Si le fichier est invalide, on n'arrive pas ici (`?` au-dessus) : les
     // derniers réglages valides restent en place.
     window::sync_settings(app, &config.settings);
+    // Lancement au démarrage de Windows : le registre suit `launchAtStartup`.
+    autostart::sync(config.settings.launch_at_startup);
     // Ménage du cache d'icônes : celles des tuiles retirées sont supprimées.
     icons::remove_orphans(dir, &config.tiles);
     // Dernière expression sans `;` : c'est la valeur renvoyée par la fonction.
@@ -175,7 +178,14 @@ async fn get_icon(app: tauri::AppHandle, id: String) -> Option<String> {
 /// l'Explorateur Windows, pour pouvoir éditer le fichier facilement.
 #[tauri::command]
 async fn open_config_folder(app: tauri::AppHandle) -> Result<(), AppError> {
-    let dir = config::config_dir(&app)?;
+    open_config_dir(&app)
+}
+
+/// Le travail d'`open_config_folder`, aussi utilisé par le menu de l'icône de
+/// notification (tray.rs). `pub(crate)` : visible dans tout notre code, mais
+/// pas en dehors de la bibliothèque.
+pub(crate) fn open_config_dir(app: &tauri::AppHandle) -> Result<(), AppError> {
+    let dir = config::config_dir(app)?;
     // Closure qui fabrique l'erreur ; elle emprunte `dir` le temps qu'elle existe.
     let io_err = |source| AppError::Io {
         action: "d'ouvrir",
@@ -238,8 +248,12 @@ pub fn run() {
         // avant d'avoir rien initialisé. Le plugin appelle alors cette closure
         // dans la 1ʳᵉ copie, qui réaffiche sa fenêtre. `|app, _args, _cwd|` sont
         // les paramètres de la closure ; le `_` dit « paramètre inutilisé ».
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            window::show(app);
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Une copie lancée par Windows à l'ouverture de session ne doit
+            // pas faire surgir la fenêtre déjà ouverte.
+            if !autostart::launched_at_startup(&args) {
+                window::show(app);
+            }
         }))
         .plugin(window::shortcut_plugin())
         // `manage` confie une valeur à Tauri ; on la retrouve ensuite avec
@@ -254,19 +268,32 @@ pub fn run() {
             // quand même, et le front affiche l'erreur de config.
             // `.ok()` : `Result` -> `Option` (l'erreur ne sert pas ici).
             let dir = config::config_dir(handle).ok();
-            let settings = dir
+            let loaded = dir
                 .as_deref()
                 .and_then(|d| config::load_or_create(d).ok())
-                .map(|c| c.settings)
-                .unwrap_or_default();
-            window::sync_settings(handle, &settings);
+                .map(|c| c.settings);
+            // Le lancement au démarrage ne suit qu'une config *valide* : une
+            // faute de frappe dans config.json ne doit pas le désactiver.
+            if let Some(settings) = &loaded {
+                autostart::sync(settings.launch_at_startup);
+            }
+            window::sync_settings(handle, &loaded.unwrap_or_default());
+            // Icône de notification. Si elle ne peut pas être créée, l'app
+            // marche quand même (la croix quitte alors l'app, comme avant).
+            if let Err(e) = tray::create(handle) {
+                eprintln!("icône de notification non créée : {e}");
+            }
             // Rechargement automatique quand config.json est enregistré (watch.rs).
             // Le dossier existe : `load_or_create` vient de le créer au besoin.
             if let Some(dir) = &dir {
                 watch::start(handle, dir);
             }
-            if let Some(main) = handle.get_webview_window("main") {
-                window::center_on_active_monitor(handle, &main);
+            // La fenêtre est créée cachée (`"visible": false` dans
+            // tauri.conf.json). Lancement normal : on l'affiche, centrée.
+            // Lancement par Windows à l'ouverture de session : elle reste
+            // cachée, le raccourci ou l'icône de notification l'ouvriront.
+            if !autostart::launched_at_startup(std::env::args_os()) {
+                window::show(handle);
             }
             Ok(())
         })
