@@ -548,7 +548,10 @@ mod tests {
         assert_eq!(result.added, ["baldurs-gate-3", "counter-strike-2"]);
         assert_eq!(result.category, "Jeux");
 
-        let text = fs::read_to_string(&path).unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        // Sous Windows, git peut extraire config.default.json avec des fins de
+        // ligne `\r\n`, que l'import garde : on compare en `\n`.
+        let text = raw.replace("\r\n", "\n");
         let config = parse(&text);
         assert_eq!(config.categories.len(), 1);
         assert_eq!(config.tiles.len(), 2);
@@ -570,12 +573,12 @@ mod tests {
                 &text[text.find("\"tiles\"").unwrap()..],
                 "\"tiles\": []\n}\n",
             );
-        assert_eq!(back, DEFAULT);
+        assert_eq!(back, DEFAULT.replace("\r\n", "\n"));
 
         // Second import des mêmes jeux : rien n'est ajouté, fichier inchangé.
         let again = import(dir.path(), &[game(730, "Counter-Strike 2")]).unwrap();
         assert!(again.added.is_empty());
-        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+        assert_eq!(fs::read_to_string(&path).unwrap(), raw);
     }
 
     #[test]
