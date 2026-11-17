@@ -68,7 +68,18 @@ function keepSearchFocus(e: MouseEvent) {
 }
 // Retour sur la fenêtre (Alt+Tab, clic sur l'icône de la barre des tâches) :
 // focus + sélection du texte, pour pouvoir taper aussitôt.
-const onWindowFocus = () => searchBar.value?.focus();
+//
+// Cet événement arrive aussi sans vrai départ : quand la liste d'un <select>
+// se referme, ou quand Windows rend le focus à la page. On ne touche donc à
+// rien si une fenêtre (éditeur, import…) est ouverte, ni si la recherche a
+// déjà le clavier : sinon on fermait les listes, et sélectionner le texte à
+// chaque fois faisait remplacer la recherche par la lettre suivante.
+function onWindowFocus() {
+  if (editor.value || detectOpen.value || steamImportOpen.value) return;
+  const input = searchBar.value?.input;
+  if (input && document.activeElement === input) return;
+  searchBar.value?.focus();
+}
 onMounted(() => window.addEventListener("focus", onWindowFocus));
 onBeforeUnmount(() => window.removeEventListener("focus", onWindowFocus));
 

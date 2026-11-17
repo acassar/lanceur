@@ -78,6 +78,10 @@ pub struct WindowState {
     /// Un compteur plutôt qu'un booléen : si deux boîtes se chevauchent, la
     /// fermeture de la première ne réactive pas `hideOnBlur` trop tôt.
     native_dialogs: AtomicUsize,
+
+    /// La fenêtre a été réduite (taille 0×0) depuis le dernier
+    /// redimensionnement : le prochain sera une restauration.
+    was_minimized: AtomicBool,
 }
 
 /// Signale l'ouverture (`true`) ou la fermeture (`false`) d'une boîte de
@@ -282,7 +286,17 @@ fn is_in_front(window: &WebviewWindow) -> bool {
         let foreground = unsafe { GetForegroundWindow() };
         // `is_ok_and(…)` : vrai seulement si `hwnd()` réussit *et* que la
         // condition est remplie ; si `hwnd()` échoue, on répond « pas devant ».
-        window.hwnd().is_ok_and(|hwnd| hwnd.0 == foreground.0)
+        use windows::Win32::UI::WindowsAndMessaging::{GA_ROOTOWNER, GetAncestor};
+        if foreground.0.is_null() {
+            return false;
+        }
+        // Une fenêtre *possédée* par la nôtre (liste déroulante d'un `<select>`,
+        // boîte « Ouvrir »…) peut passer au premier plan : on remonte jusqu'à
+        // sa propriétaire, qui doit être notre fenêtre.
+        let root = unsafe { GetAncestor(foreground, GA_ROOTOWNER) };
+        window
+            .hwnd()
+            .is_ok_and(|hwnd| hwnd.0 == foreground.0 || hwnd.0 == root.0)
     }
     #[cfg(not(windows))]
     {
@@ -403,9 +417,24 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
                 hide_after_blur(window.app_handle().clone());
             }
         }
-        // Une restauration change la taille (de 0×0 à la vraie taille).
-        tauri::WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
-            if let Some(main) = main_window(window.app_handle())
+        // Une réduction donne une taille de 0×0 : on la note.
+        tauri::WindowEvent::Resized(size) if size.width == 0 || size.height == 0 => {
+            window
+                .state::<WindowState>()
+                .was_minimized
+                .store(true, Ordering::Relaxed);
+        }
+        // Une restauration change la taille (de 0×0 à la vraie taille). On ne
+        // rend le focus à la page que dans ce cas-là, pas à chaque
+        // redimensionnement, pour ne jamais le voler sans raison.
+        tauri::WindowEvent::Resized(_) => {
+            // `swap(false)` remet le drapeau à faux et rend l'ancienne valeur.
+            let restored = window
+                .state::<WindowState>()
+                .was_minimized
+                .swap(false, Ordering::Relaxed);
+            if restored
+                && let Some(main) = main_window(window.app_handle())
                 && is_in_front(&main)
             {
                 focus_webview(&main);
@@ -453,13 +482,15 @@ fn hide_after_blur(app: AppHandle) {
             if !enabled || dialog || minimized {
                 return;
             }
-            if is_in_front(&window) {
-                // Fausse alerte : la fenêtre est toujours devant, mais la page a
-                // pu perdre le clavier. On le lui rend, sinon la frappe n'arrive
-                // plus dans la recherche, et un vrai départ vers une autre app ne
-                // serait plus signalé (donc plus de réduction automatique).
-                focus_webview(&window);
-            } else {
+            // Fausse alerte si la fenêtre est toujours devant : on ne fait rien.
+            //
+            // Surtout, on ne rend *pas* le focus à la page : la perte de focus
+            // vient souvent d'elle-même (liste déroulante d'un `<select>`, qui
+            // est une petite fenêtre à part). Reprendre le focus refermait la
+            // liste aussitôt, et le front remettait le clavier dans la
+            // recherche en sélectionnant son texte : la fenêtre « scintillait »,
+            // les listes étaient inutilisables et la frappe se perdait.
+            if !is_in_front(&window) {
                 let _ = window.minimize();
             }
         });
