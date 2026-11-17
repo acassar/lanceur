@@ -62,6 +62,23 @@ export interface SteamImportResult {
 }
 
 /**
+ * Application installée (raccourci du menu Démarrer), trouvée par la commande
+ * Rust `detect_apps` (`DetectedApp` dans apps.rs).
+ */
+export interface DetectedApp {
+  name: string;
+  /** Chemin du raccourci, tel qu'il sera écrit dans la tuile (`%APPDATA%\…\X.lnk`). */
+  path: string;
+  /** Sous-dossier du menu Démarrer, `null` à la racine. */
+  folder: string | null;
+  /** Une tuile lance déjà cette application (même raccourci ou même nom). */
+  inConfig: boolean;
+}
+
+/** Résultat de la commande `import_apps` : même forme que l'import Steam. */
+export type AppsImportResult = SteamImportResult;
+
+/**
  * Tuile envoyée par l'éditeur aux commandes `add_tile` / `update_tile`
  * (`TileDraft` dans editor.rs) : tout sauf l'id, que Rust choisit à l'ajout
  * à partir du nom, et garde à la modification.

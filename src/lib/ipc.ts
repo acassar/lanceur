@@ -3,7 +3,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { SAMPLE, createMockIpc } from "./ipc.mock";
-import type { Config, SteamGame, SteamImportResult, Tile, TileDraft } from "./types";
+import type { AppsImportResult, Config, DetectedApp, SteamGame, SteamImportResult, Tile, TileDraft } from "./types";
 
 export interface Ipc {
   getConfig(): Promise<Config>;
@@ -43,6 +43,17 @@ export interface Ipc {
    */
   importSteamGames(appIds: number[]): Promise<SteamImportResult>;
   /**
+   * Applications installées (raccourcis du menu Démarrer), triées par nom ;
+   * `inConfig` marque celles qui ont déjà une tuile. Ne modifie rien.
+   */
+  detectApps(): Promise<DetectedApp[]>;
+  /**
+   * Ajoute à config.json une tuile par raccourci choisi (catégorie
+   * « Applications », ou « Outils » si elle existe). Seuls des chemins renvoyés
+   * par `detectApps` sont acceptés ; ceux qui ont déjà une tuile sont ignorés.
+   */
+  importApps(paths: string[]): Promise<AppsImportResult>;
+  /**
    * Icône de la tuile en `data:` URL (PNG ou JPEG), ou `null` si aucune n'a
    * été trouvée (on garde alors le monogramme). Mise en cache côté Rust.
    */
@@ -66,6 +77,8 @@ export interface Ipc {
    * l'icône de notification est choisie. Renvoie une fonction qui arrête l'écoute.
    */
   onSteamImportRequested(callback: () => void): Promise<() => void>;
+  /** Idem pour l'entrée « Détecter les applications… ». */
+  onDetectAppsRequested(callback: () => void): Promise<() => void>;
   /** Ouvre le dossier de config.json dans l'Explorateur. */
   openConfigFolder(): Promise<void>;
 }
@@ -78,6 +91,9 @@ export const CONFIG_CHANGED_EVENT = "config-changed";
 
 /** Événement émis par le menu de l'icône de notification (`STEAM_IMPORT_EVENT` dans tray.rs). */
 export const STEAM_IMPORT_EVENT = "steam-import-requested";
+
+/** Événement émis par le menu de l'icône de notification (`DETECT_APPS_EVENT` dans tray.rs). */
+export const DETECT_APPS_EVENT = "detect-apps-requested";
 
 /** Miroir de `HotkeyStatus` dans window.rs. */
 export interface HotkeyStatus {
@@ -121,12 +137,15 @@ function createTauriIpc(): Ipc {
     pickFile: (images) => invoke<string | null>("pick_file", { images }),
     detectSteamGames: () => invoke<SteamGame[]>("detect_steam_games"),
     importSteamGames: (appIds) => invoke<SteamImportResult>("import_steam_games", { appIds }),
+    detectApps: () => invoke<DetectedApp[]>("detect_apps"),
+    importApps: (paths) => invoke<AppsImportResult>("import_apps", { paths }),
     getIcon: (id) => invoke<string | null>("get_icon", { id }),
     hideWindow: () => invoke("hide_window"),
     getHotkeyStatus: () => invoke<HotkeyStatus>("get_hotkey_status"),
     onWindowShown: (callback) => listen(WINDOW_SHOWN_EVENT, () => callback()),
     onConfigChanged: (callback) => listen(CONFIG_CHANGED_EVENT, () => callback()),
     onSteamImportRequested: (callback) => listen(STEAM_IMPORT_EVENT, () => callback()),
+    onDetectAppsRequested: (callback) => listen(DETECT_APPS_EVENT, () => callback()),
     openConfigFolder: () => invoke("open_config_folder"),
   };
 }

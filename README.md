@@ -34,7 +34,7 @@ Pour essayer une version de développement : onglet **Actions** → dernier run 
 Le lanceur a aussi une icône dans la zone de notification (à droite de la barre des tâches, éventuellement sous la flèche `^`) :
 
 - clic gauche : afficher la fenêtre, ou la masquer si elle est devant ;
-- clic droit : *Afficher le lanceur*, *Importer les jeux Steam…*, *Ouvrir le dossier de config*, *Quitter*.
+- clic droit : *Afficher le lanceur*, *Détecter les applications…*, *Importer les jeux Steam…*, *Ouvrir le dossier de config*, *Quitter*.
 
 La croix de la fenêtre la masque au lieu de fermer l'app (le raccourci doit rester actif) : pour quitter, passez par *Quitter* dans ce menu.
 
@@ -48,9 +48,20 @@ Pour réordonner, glissez une tuile à sa nouvelle place dans sa catégorie ou d
 
 Comme pour les favoris, seules les lignes concernées de `config.json` changent : une tuile ajoutée ou modifiée est écrite sur une ligne, le reste du fichier (ordre, lignes vides, mise en forme) ne bouge pas, et un fichier invalide n'est jamais modifié. L'id d'une nouvelle tuile est tiré de son nom ; il ne change plus ensuite.
 
+### Détecter les applications installées
+
+Au premier démarrage, l'écran d'accueil propose deux choix : *Détecter mes applications* ou *Partir de zéro* (ajouter ses tuiles une à une, ou éditer `config.json`). La détection est aussi disponible à tout moment par *Détecter les applications…* (menu de l'icône de notification).
+
+Elle liste dans une même fenêtre :
+
+- les **applications** du menu Démarrer (raccourcis `.lnk` de tous les utilisateurs et de votre compte), sans les désinstalleurs, aides, sites web, documents ni outils d'administration de Windows. Elles ne sont pas cochées d'office (le menu Démarrer en contient souvent beaucoup) ; un champ permet de filtrer la liste. Chacune devient une tuile `app` qui ouvre le raccourci (`%APPDATA%\…\Discord.lnk`), dans la catégorie « Outils » ou « Applications » si elle existe, sinon dans une nouvelle catégorie « Applications » ;
+- les **jeux Steam** installés, cochés d'office (même règle que l'import ci-dessous).
+
+Rien n'est jamais supprimé ni remplacé : ce qui a déjà une tuile (même raccourci, ou une application du même nom) est grisé et n'est pas ajouté une deuxième fois.
+
 ### Importer les jeux Steam
 
-*Importer mes jeux Steam* (écran d'accueil) ou *Importer les jeux Steam…* (menu de l'icône de notification) liste les jeux installés sur le PC, dans toutes vos bibliothèques Steam (un dossier `SteamLibrary` par disque). Cochez ceux à ajouter : chacun devient une tuile `steam` dans la catégorie « Jeux » (créée si besoin). Les jeux qui ont déjà une tuile sont grisés et jamais ajoutés deux fois.
+*Importer les jeux Steam…* (menu de l'icône de notification) liste les jeux installés sur le PC, dans toutes vos bibliothèques Steam (un dossier `SteamLibrary` par disque). Cochez ceux à ajouter : chacun devient une tuile `steam` dans la catégorie « Jeux » (créée si besoin). Les jeux qui ont déjà une tuile sont grisés et jamais ajoutés deux fois.
 
 L'import ne fait qu'*ajouter* des lignes à la fin de `"categories"` et `"tiles"` dans `config.json` : vos tuiles, leur ordre et votre mise en forme restent tels quels, et un fichier invalide n'est jamais modifié. Relancez l'import après avoir installé de nouveaux jeux ; un jeu désinstallé garde sa tuile (supprimez-la à la main si besoin).
 
@@ -66,7 +77,7 @@ Toute la configuration est dans un fichier JSON lisible :
 %APPDATA%\io.github.acassar.lanceur\config.json
 ```
 
-Au premier démarrage, il est créé **sans tuiles** (réglages par défaut, listes `categories`, `favorites` et `tiles` vides) : l'app affiche alors un écran d'accueil avec un exemple à copier. Une config déjà existante n'est jamais modifiée. Un exemple complet se trouve dans [src-tauri/config.example.json](src-tauri/config.example.json). Le bouton « Ouvrir le dossier » de l'app (écran d'accueil, catégorie vide ou erreur dans le fichier) ouvre ce dossier dans l'Explorateur.
+Au premier démarrage, il est créé **sans tuiles** (réglages par défaut, listes `categories`, `favorites` et `tiles` vides) : l'app affiche alors un écran d'accueil qui propose de détecter les applications installées ou de partir de zéro (avec un exemple à copier). Une config déjà existante n'est jamais modifiée. Un exemple complet se trouve dans [src-tauri/config.example.json](src-tauri/config.example.json). Le bouton « Ouvrir le dossier » de l'app (écran d'accueil, catégorie vide ou erreur dans le fichier) ouvre ce dossier dans l'Explorateur.
 
 **Le fichier est relu dès qu'il est enregistré** : les tuiles, les catégories et les réglages (raccourci compris) changent aussitôt, sans redémarrer. S'il contient une erreur, l'app l'affiche (ligne, colonne, tuile concernée) et garde la dernière version valide.
 

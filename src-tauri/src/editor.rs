@@ -15,8 +15,8 @@
 //!    sinon rien n'est écrit ;
 //! 5. l'écrire de façon atomique (`fsutil::write_atomic`).
 //!
-//! [`add_tiles`] accepte plusieurs tuiles d'un coup : l'écran d'accueil qui
-//! détectera les apps installées pourra s'en servir.
+//! [`add_tiles_with`] accepte plusieurs tuiles d'un coup : la détection des
+//! applications installées (apps.rs) s'en sert.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -59,16 +59,32 @@ pub struct TileDraft {
 /// Ajoute une tuile par brouillon, à la fin de `"tiles"` (donc en dernier
 /// dans sa catégorie). Renvoie les tuiles créées, avec leur id.
 pub fn add_tiles(dir: &Path, drafts: &[TileDraft]) -> Result<Vec<Tile>, AppError> {
+    add_tiles_with(dir, |_| drafts.to_vec())
+}
+
+/// Comme [`add_tiles`], mais les brouillons sont calculés par `make_drafts` à
+/// partir de la config lue *sous le verrou d'écriture* : la détection des
+/// applications (apps.rs) écarte ainsi ce qui a déjà une tuile sans risquer
+/// qu'une autre écriture se glisse entre la vérification et l'ajout.
+///
+/// `impl FnOnce(&Config) -> Vec<TileDraft>` : n'importe quelle closure qui
+/// reçoit la config et renvoie une liste ; `FnOnce` dit qu'elle n'est appelée
+/// qu'une fois (elle peut donc modifier ce qu'elle emprunte).
+pub fn add_tiles_with(
+    dir: &Path,
+    make_drafts: impl FnOnce(&Config) -> Vec<TileDraft>,
+) -> Result<Vec<Tile>, AppError> {
     let _guard = config::write_lock();
     let path = dir.join(config::FILE_NAME);
     let text = config::read_or_create_text(dir)?;
     let config = config::parse(&text, &path)?;
+    let drafts = make_drafts(&config);
 
     let mut expected = config.clone();
     let mut new_categories = Vec::new();
     let mut taken: HashSet<String> = config.tiles.iter().map(|t| t.id.clone()).collect();
     let mut added = Vec::new();
-    for draft in drafts {
+    for draft in &drafts {
         let (category, created) = resolve_category(&mut expected, draft)?;
         if created {
             new_categories.push(category.clone());

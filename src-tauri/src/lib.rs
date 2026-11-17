@@ -5,6 +5,7 @@
 //! fichier existe dès qu'il est là ; en Rust, il faut le déclarer).
 //! `use config::Config;` est ensuite l'équivalent d'un `import { Config }`.
 
+mod apps;
 mod autostart;
 mod config;
 mod editor;
@@ -324,6 +325,40 @@ async fn import_steam_games(
     .unwrap_or_else(|e| Err(AppError::Steam(format!("import interrompu ({e})"))))
 }
 
+/// Commande `detect_apps` : applications installées (raccourcis du menu
+/// Démarrer), triées par nom, avec celles qui ont déjà une tuile marquées.
+/// Ne modifie rien : le front affiche la liste et l'utilisateur coche.
+#[tauri::command]
+async fn detect_apps(app: tauri::AppHandle) -> Result<Vec<apps::DetectedApp>, AppError> {
+    let dir = config::config_dir(&app)?;
+    // Parcours de dossiers et lecture de raccourcis : sur un thread d'attente.
+    tauri::async_runtime::spawn_blocking(move || apps::detect(apps::current_config(&dir).as_ref()))
+        .await
+        .map_err(|e| AppError::Detect(format!("recherche interrompue ({e})")))
+}
+
+/// Commande `import_apps` : `invoke("import_apps", { paths: ["%APPDATA%\\…\\Discord.lnk"] })`.
+///
+/// Comme pour Steam, le front n'envoie que des chemins *déjà détectés* : Rust
+/// refait la détection et ne garde que ceux qui y figurent. Le front ne peut
+/// donc pas faire ajouter n'importe quel programme par ce chemin-là.
+#[tauri::command]
+async fn import_apps(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<steam::ImportResult, AppError> {
+    let dir = config::config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let chosen: Vec<apps::DetectedApp> = apps::detect(None)
+            .into_iter()
+            .filter(|a| paths.contains(&a.path))
+            .collect();
+        apps::import(&dir, &chosen)
+    })
+    .await
+    .unwrap_or_else(|e| Err(AppError::ConfigWrite(format!("import interrompu ({e})"))))
+}
+
 /// Commande `get_icon` : `invoke("get_icon", { id: "discord" })`.
 ///
 /// Renvoie l'icône de la tuile en `data:` URL (`data:image/png;base64,…`), ou
@@ -488,6 +523,8 @@ pub fn run() {
             reorder_favorites,
             detect_steam_games,
             import_steam_games,
+            detect_apps,
+            import_apps,
             get_icon,
             open_config_folder,
             hide_window,
